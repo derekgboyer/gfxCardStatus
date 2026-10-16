@@ -1,0 +1,175 @@
+name: macOS build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  universal:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # CFBundleVersion is 5000 + git rev-list --count HEAD. A shallow
+          # checkout would publish a build number that does not match a local
+          # build of the same commit.
+          fetch-depth: 0
+
+      - name: Show Xcode
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          if git rev-parse --is-shallow-repository | grep -qx true; then
+            echo "Checkout is shallow. CFBundleVersion would not match a full clone." >&2
+            exit 1
+          fi
+          echo "Commit count: $(git rev-list --count HEAD)"
+
+      - name: Policy tests
+        run: |
+          set -euo pipefail
+          cc -Wall -Wextra -Wstrict-prototypes -Werror -I Classes \
+            -o "${RUNNER_TEMP}/test-power-policy" \
+            Classes/GSPowerPolicy.c script/test-power-policy.c
+          "${RUNNER_TEMP}/test-power-policy"
+          cc -Wall -Wextra -Wstrict-prototypes -Wmissing-prototypes -Werror -std=c11 \
+            -I Classes \
+            -o "${RUNNER_TEMP}/test-rules" \
+            Classes/GSRules.c script/test-rules.c
+          "${RUNNER_TEMP}/test-rules"
+
+      - name: Appcast script rejects source archives
+        run: |
+          set -euo pipefail
+          APPCAST="${RUNNER_TEMP}/appcast-test.xml"
+          python3 script/update_appcast.py \
+            --appcast "$APPCAST" \
+            --link "https://github.com/example/gfxCardStatus" \
+            --version 5001 \
+            --short-version 2.5 \
+            --url "https://github.com/example/gfxCardStatus/releases/download/v2.5/gfxCardStatus-2.5.zip" \
+            --length 10 \
+            --ed-signature "dGVzdA==" \
+            --minimum-system-version 13.0 \
+            --title "Version 2.5"
+          grep -q "gfxCardStatus-2.5.zip" "$APPCAST"
+          grep -q "dGVzdA==" "$APPCAST"
+          if python3 script/update_appcast.py \
+            --appcast "${RUNNER_TEMP}/appcast-source.xml" \
+            --version 5001 \
+            --short-version 2.5 \
+            --url "https://github.com/example/gfxCardStatus/releases/download/v2.5/gfxCardStatus-2.5-source.zip" \
+            --length 10 \
+            --title "Version 2.5"; then
+            echo "A source archive was accepted as a Sparkle update." >&2
+            exit 1
+          fi
+
+      - name: Build Release universal
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace gfxCardStatus.xcworkspace \
+            -scheme gfxCardStatus \
+            -configuration Release \
+            -derivedDataPath "${RUNNER_TEMP}/gfxcardstatus" \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS="arm64 x86_64" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Verify architectures and layout
+        run: |
+          set -euo pipefail
+          APP="${RUNNER_TEMP}/gfxcardstatus/Build/Products/Release/gfxCardStatus.app"
+          BINARY="${APP}/Contents/MacOS/gfxCardStatus"
+          FRAMEWORK="${APP}/Contents/Frameworks/Sparkle.framework"
+          test -d "${APP}"
+          test -x "${BINARY}"
+          lipo -info "${BINARY}"
+          lipo -info "${BINARY}" | grep -q arm64
+          lipo -info "${BINARY}" | grep -q x86_64
+          test -f "${APP}/Contents/Resources/gfxCardStatus.icns"
+          test -f "${APP}/Contents/Resources/Credits.rtf"
+          test -f "${APP}/Contents/Resources/README.md"
+          test -f "${APP}/Contents/Resources/LICENSE"
+          test -e "${APP}/Contents/Resources/Base.lproj/MainMenu.nib"
+          test -e "${APP}/Contents/Resources/Base.lproj/AdvancedPreferencesView.nib"
+          test -e "${APP}/Contents/Resources/Base.lproj/GeneralPreferencesView.nib"
+          test -f "${APP}/Contents/Resources/en.lproj/Localizable.strings"
+          plutil -lint "${APP}/Contents/Info.plist"
+          test -d "${FRAMEWORK}"
+          SPARKLE_PATHS=(
+            "${FRAMEWORK}/Versions/B/Autoupdate"
+            "${FRAMEWORK}/Versions/B/Updater.app"
+            "${FRAMEWORK}/Versions/B/XPCServices/Installer.xpc"
+            "${FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc"
+            "${FRAMEWORK}/Versions/B/Sparkle"
+          )
+          for required in "${SPARKLE_PATHS[@]}"; do
+            if [ ! -e "$required" ]; then
+              echo "Sparkle layout is missing: ${required}" >&2
+              exit 1
+            fi
+          done
+          lipo -info "${FRAMEWORK}/Versions/B/Sparkle" | grep -q arm64
+          lipo -info "${FRAMEWORK}/Versions/B/Sparkle" | grep -q x86_64
+          PLIST="${APP}/Contents/Info.plist" python3 - <<'PY'
+          import os, plistlib, subprocess, sys
+          with open(os.environ["PLIST"], "rb") as handle:
+              info = plistlib.load(handle)
+          ok = True
+          expected = {
+              "SUFeedURL": "https://gfx.io/appcasts/release.xml",
+              "SUPublicEDKey": "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=",
+              "CFBundleIdentifier": "com.codykrieger.gfxCardStatus",
+          }
+          for key, want in expected.items():
+              value = info.get(key, "")
+              if value != want:
+                  print(f"{key}={value!r}, expected {want!r}", file=sys.stderr)
+                  ok = False
+          for key in ("SUFeedURL", "SUPublicEDKey", "CFBundleVersion", "CFBundleShortVersionString", "LSMinimumSystemVersion"):
+              value = info.get(key, "")
+              if not isinstance(value, str) or not value or "$(" in value:
+                  print(f"{key} is missing or was not expanded: {value!r}", file=sys.stderr)
+                  ok = False
+          count = int(subprocess.check_output(["git", "rev-list", "--count", "HEAD"], text=True).strip())
+          build = info.get("CFBundleVersion", "")
+          expected_build = str(5000 + count)
+          if build != expected_build:
+              print(f"CFBundleVersion={build!r}, expected {expected_build} (5000 + {count} commits)", file=sys.stderr)
+              ok = False
+          if info.get("LSUIElement") is not True:
+              print("LSUIElement is not true", file=sys.stderr)
+              ok = False
+          print(f"SUFeedURL={info.get('SUFeedURL')}")
+          print(f"CFBundleVersion={build}")
+          sys.exit(0 if ok else 1)
+          PY
+          # Hardened runtime is the runtime codesign flag (0x10000).
+          codesign -d --verbose=2 "${APP}" 2>&1 | grep -E -q 'flags=.*runtime'
+          set +e
+          ENT_DUMP=$(codesign -d --entitlements - "${BINARY}" 2>&1)
+          ent_status=$?
+          set -e
+          printf '%s\n' "$ENT_DUMP"
+          if [ "$ent_status" -ne 0 ] && ! printf '%s\n' "$ENT_DUMP" | grep -q "no entitlements"; then
+            echo "Could not read entitlements for ${BINARY}." >&2
+            exit 1
+          fi
+          if printf '%s\n' "$ENT_DUMP" | grep -q "com.apple.security.get-task-allow"; then
+            echo "The Release executable still requests com.apple.security.get-task-allow." >&2
+            exit 1
+          fi
+          if printf '%s\n' "$ENT_DUMP" | grep -q "com.apple.security.cs.disable-library-validation"; then
+            echo "The Release executable disables library validation. That entitlement is Debug-only." >&2
+            exit 1
+          fi
+          codesign --verify --verbose=2 "${APP}"

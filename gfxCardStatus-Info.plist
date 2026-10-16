@@ -54,9 +54,9 @@
 	<key>SUEnableSystemProfiling</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>$(SU_FEED_URL)</string>
+	<string>$(SPARKLE_FEED_URL)</string>
 	<key>SUPublicEDKey</key>
-	<string>4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=</string>
+	<string>$(SPARKLE_PUBLIC_ED_KEY)</string>
 	<key>SUShowReleaseNotes</key>
 	<true/>
 </dict>

@@ -2,8 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Hardened Runtime is enabled on the target. The app is intentionally not
-	     sandboxed: GPU switching opens an IOKit user client, and the dependency
-	     list reads other processes with sysctl. -->
+	<!-- Release entitlements. Hardened Runtime is on. The app is intentionally
+	     not sandboxed: GPU switching opens an IOKit user client, and the
+	     dependency list reads other processes with sysctl.
+	     Do not add com.apple.security.get-task-allow. Notarization rejects it.
+	     Debug builds use gfxCardStatusDebug.entitlements instead. -->
 </dict>
 </plist>
