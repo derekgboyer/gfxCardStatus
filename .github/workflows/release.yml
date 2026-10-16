@@ -82,8 +82,15 @@ jobs:
             "SPARKLE_FEED_URL=${FEED_URL}"
           )
           if [ -n "${SPARKLE_PUBLIC_ED_KEY}" ]; then
-            echo "Passing SPARKLE_PUBLIC_ED_KEY from the repository variable or secret."
-            XCODE_ARGS+=("SPARKLE_PUBLIC_ED_KEY=${SPARKLE_PUBLIC_ED_KEY}")
+            # Accept the bare base64 key or the <key>SUPublicEDKey</key><string>…</string>
+            # snippet generate_keys prints. xcodebuild receives only the bare key.
+            # The script does not print the raw variable, which must not be the private key.
+            if ! SANITIZED=$(printf '%s' "$SPARKLE_PUBLIC_ED_KEY" | python3 script/sparkle_public_ed_key.py); then
+              exit 1
+            fi
+            export SPARKLE_PUBLIC_ED_KEY="$SANITIZED"
+            echo "Using a ${#SANITIZED}-character Ed25519 public key from SPARKLE_PUBLIC_ED_KEY."
+            XCODE_ARGS+=("SPARKLE_PUBLIC_ED_KEY=${SANITIZED}")
           else
             echo "SPARKLE_PUBLIC_ED_KEY is not set as a repository variable or secret."
             echo "The build keeps the public key in the Release build setting."
@@ -104,21 +111,34 @@ jobs:
           want_feed = os.environ["FEED_URL"]
           override = os.environ.get("SPARKLE_PUBLIC_ED_KEY", "").strip()
           want_key = override or "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao="
+          source = "repository variable" if override else "project default"
           ok = True
           if feed != want_feed or not isinstance(feed, str) or "$(" in feed:
               print(f"SUFeedURL={feed!r}, expected {want_feed!r}", file=sys.stderr)
               ok = False
           if key != want_key or not isinstance(key, str) or "$(" in key:
               print("SUPublicEDKey was not the expected key.", file=sys.stderr)
+              print(f"SUPublicEDKey in Info.plist={key!r}", file=sys.stderr)
+              print(f"expected {want_key!r} ({source})", file=sys.stderr)
               ok = False
           print(f"SUFeedURL={feed}")
-          print("SUPublicEDKey=" + ("override" if override else "project default"))
+          print(f"SUPublicEDKey source={source}")
           sys.exit(0 if ok else 1)
           PY
           if [ "${{ steps.sign.outputs.mode }}" = "developer-id" ]; then
-            # Sign inside-out. codesign --deep is not used for signing; it would
-            # resign Sparkle with one set of entitlements and notarization would
-            # come back Invalid. --deep below is only used to verify.
+            # Sign inside-out, in the order Sparkle documents for Developer ID
+            # distribution outside Xcode's archive export. codesign --deep is not
+            # used for signing. --timestamp is required for notarization.
+            #
+            # Sparkle 2.6 and later ship Downloader.xpc with no sandbox
+            # entitlement unless the framework was rebuilt with
+            # DOWNLOADER_SANDBOXED_ENTITLEMENTS. Xcode's embed step signs
+            # Sparkle.framework/Versions/B only; it does not strip a sandbox
+            # entitlement from Downloader.xpc because the stock binary has none.
+            # gfxCardStatus is not sandboxed and does not set
+            # SUEnableDownloaderService, so that XPC service is not part of the
+            # update path. Preserve Downloader's incoming entitlements. Do not
+            # require com.apple.security.app-sandbox.
             IDENTITY="$SIGN_ID"
             ENTITLEMENTS="${GITHUB_WORKSPACE}/gfxCardStatus.entitlements"
             test -f "$ENTITLEMENTS"
@@ -137,48 +157,90 @@ jobs:
                 exit 1
               fi
             done
-            sign_sparkle() {
-              echo "Signing ${1}"
-              # Downloader.xpc is sandboxed and must keep its own entitlements.
-              # Preserving each helper's entitlements avoids signing them with
-              # the app's empty entitlements file.
-              codesign --force --sign "$IDENTITY" --preserve-metadata=entitlements --options runtime --timestamp "$1"
+            entitlement_text() {
+              # Entitlements are on stdout. "Executable=" is on stderr.
+              codesign -d --entitlements - "$1" 2>/dev/null || true
             }
-            sign_sparkle "${FRAMEWORK}/Versions/B/XPCServices/Installer.xpc"
-            sign_sparkle "${FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc"
-            sign_sparkle "${FRAMEWORK}/Versions/B/Autoupdate"
-            sign_sparkle "${FRAMEWORK}/Versions/B/Updater.app"
-            sign_sparkle "${FRAMEWORK}"
+            normalize_ents() {
+              printf '%s\n' "$1" | python3 -c '
+import sys
+lines = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip() and not ln.startswith("Executable=")]
+if not lines or lines == ["[Dict]"]:
+    sys.stdout.write("empty\n")
+else:
+    sys.stdout.write("\n".join(lines) + "\n")
+'
+            }
+            sign_runtime() {
+              echo "Signing ${1}"
+              codesign --force --sign "$IDENTITY" --options runtime --timestamp "$1"
+            }
+            require_developer_id() {
+              local path="$1"
+              local info ents
+              echo "Verifying ${path}"
+              codesign --verify --strict --verbose=2 "$path"
+              info=$(codesign -d --verbose=2 "$path" 2>&1)
+              printf '%s\n' "$info"
+              if ! printf '%s\n' "$info" | grep -q "Authority=Developer ID Application"; then
+                echo "${path} is not signed by a Developer ID Application identity." >&2
+                exit 1
+              fi
+              if ! printf '%s\n' "$info" | grep -E -q "flags=.*runtime"; then
+                echo "${path} does not have the hardened runtime." >&2
+                exit 1
+              fi
+              if ! printf '%s\n' "$info" | grep -E -q "Timestamp=.*[0-9]"; then
+                echo "${path} has no secure timestamp. Notarization would reject it." >&2
+                exit 1
+              fi
+              ents=$(entitlement_text "$path")
+              printf '%s\n' "$ents"
+              if printf '%s\n' "$ents" | grep -q "com.apple.security.get-task-allow"; then
+                echo "${path} requests com.apple.security.get-task-allow." >&2
+                exit 1
+              fi
+            }
+            DOWNLOADER="${FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc"
+            DOWNLOADER_ENTS_BEFORE=$(entitlement_text "$DOWNLOADER")
+            sign_runtime "${FRAMEWORK}/Versions/B/XPCServices/Installer.xpc"
+            echo "Signing ${DOWNLOADER}"
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp --preserve-metadata=entitlements "$DOWNLOADER"
+            DOWNLOADER_ENTS_AFTER=$(entitlement_text "$DOWNLOADER")
+            BEFORE_NORM=$(normalize_ents "$DOWNLOADER_ENTS_BEFORE")
+            AFTER_NORM=$(normalize_ents "$DOWNLOADER_ENTS_AFTER")
+            if [ "$BEFORE_NORM" != "$AFTER_NORM" ]; then
+              echo "Re-signing Downloader.xpc changed its entitlements." >&2
+              printf '%s\n' "$DOWNLOADER_ENTS_BEFORE" >&2
+              printf '%s\n' "$DOWNLOADER_ENTS_AFTER" >&2
+              exit 1
+            fi
+            sign_runtime "${FRAMEWORK}/Versions/B/Autoupdate"
+            sign_runtime "${FRAMEWORK}/Versions/B/Updater.app"
+            sign_runtime "${FRAMEWORK}"
             echo "Signing ${BINARY}"
             codesign --force --sign "$IDENTITY" --options runtime --timestamp --entitlements "$ENTITLEMENTS" "$BINARY"
             echo "Signing ${APP}"
             codesign --force --sign "$IDENTITY" --options runtime --timestamp --entitlements "$ENTITLEMENTS" "$APP"
-            set +e
-            ENT_DUMP=$(codesign -d --entitlements - "$BINARY" 2>&1)
-            ent_status=$?
-            set -e
-            printf '%s\n' "$ENT_DUMP"
-            if [ "$ent_status" -ne 0 ] && ! printf '%s\n' "$ENT_DUMP" | grep -q "no entitlements"; then
-              echo "Could not read entitlements for ${BINARY}." >&2
-              exit 1
-            fi
-            if printf '%s\n' "$ENT_DUMP" | grep -q "com.apple.security.get-task-allow"; then
-              echo "The app executable still requests com.apple.security.get-task-allow." >&2
-              exit 1
-            fi
-            if printf '%s\n' "$ENT_DUMP" | grep -q "com.apple.security.cs.disable-library-validation"; then
+            for signed in \
+              "${FRAMEWORK}/Versions/B/XPCServices/Installer.xpc" \
+              "$DOWNLOADER" \
+              "${FRAMEWORK}/Versions/B/Autoupdate" \
+              "${FRAMEWORK}/Versions/B/Updater.app" \
+              "${FRAMEWORK}" \
+              "$BINARY" \
+              "$APP"
+            do
+              require_developer_id "$signed"
+            done
+            if entitlement_text "$BINARY" | grep -q "com.apple.security.cs.disable-library-validation"; then
               echo "The app executable disables library validation. That entitlement is Debug-only." >&2
               exit 1
             fi
-            DOWNLOADER="${FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc"
-            set +e
-            DL_DUMP=$(codesign -d --entitlements - "$DOWNLOADER" 2>&1)
-            dl_status=$?
-            set -e
-            printf '%s\n' "$DL_DUMP"
-            if [ "$dl_status" -ne 0 ] || ! printf '%s\n' "$DL_DUMP" | grep -q "com.apple.security.app-sandbox"; then
-              echo "Downloader.xpc lost its Sparkle sandbox entitlement." >&2
-              exit 1
+            if printf '%s\n' "$AFTER_NORM" | grep -q "com.apple.security.app-sandbox"; then
+              echo "Downloader.xpc kept the sandbox entitlement from its incoming signature."
+            else
+              echo "Downloader.xpc has no app-sandbox entitlement. Sparkle 2.10 ships it that way unless DOWNLOADER_SANDBOXED_ENTITLEMENTS is enabled. gfxCardStatus is not sandboxed, so this XPC service is not required for updates."
             fi
           fi
           codesign --verify --deep --strict --verbose=2 "$APP"
@@ -365,6 +427,36 @@ jobs:
           APPCAST="${RUNNER_TEMP}/dist/appcast.xml"
           rm -f "$APPCAST"
           if [ -n "${SPARKLE_PRIVATE_KEY}" ]; then
+            # sign_update prints the private key on a base64 decode error, and
+            # --ed-key-file - reads only one line. Write one trimmed line to a
+            # mode 0600 file and redact that line out of any tool output.
+            KEY_FILE="${RUNNER_TEMP}/sparkle-ed-private-key"
+            rm -f "$KEY_FILE"
+            cleanup_private_key() { rm -f "$KEY_FILE"; }
+            trap cleanup_private_key EXIT
+            printf '%s' "$SPARKLE_PRIVATE_KEY" | KEY_FILE="$KEY_FILE" python3 -c '
+import os, sys
+from pathlib import Path
+raw = sys.stdin.read().strip()
+lines = [line.strip() for line in raw.splitlines() if line.strip()]
+if len(lines) != 1:
+    sys.exit("SPARKLE_PRIVATE_KEY must be the single-line base64 EdDSA private key from generate_keys. The value was not printed.")
+path = Path(os.environ["KEY_FILE"])
+path.write_text(lines[0] + "\n", encoding="utf-8")
+os.chmod(path, 0o600)
+'
+            redact_private_key() {
+              python3 -c '
+import os, sys
+text = sys.stdin.read()
+secret = os.environ.get("SPARKLE_PRIVATE_KEY", "")
+for line in secret.splitlines():
+    token = line.strip()
+    if len(token) >= 16:
+        text = text.replace(token, "[redacted]")
+sys.stdout.write(text)
+'
+            }
             curl -fsSL -o "${RUNNER_TEMP}/Sparkle.tar.xz" "https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz"
             mkdir -p "${RUNNER_TEMP}/Sparkle"
             tar -xf "${RUNNER_TEMP}/Sparkle.tar.xz" -C "${RUNNER_TEMP}/Sparkle"
@@ -375,20 +467,28 @@ jobs:
               exit 1
             fi
             chmod +x "$GENERATE" "$SIGN_UPDATE"
-            if ! printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$GENERATE" \
-              --ed-key-file - \
+            set +e
+            GEN_OUT=$("$GENERATE" \
+              --ed-key-file "$KEY_FILE" \
               --download-url-prefix "$PREFIX" \
               --maximum-versions 1 \
               --maximum-deltas 0 \
               -o "$APPCAST" \
-              "$ARCHIVES"; then
+              "$ARCHIVES" 2>&1)
+            gen_status=$?
+            set -e
+            printf '%s\n' "$GEN_OUT" | redact_private_key
+            if [ "$gen_status" -ne 0 ]; then
               echo "generate_appcast failed. Signing the archive and writing the feed directly."
               rm -f "$APPCAST"
-              SIG_LINE=$(printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - "$ZIP")
-              echo "$SIG_LINE"
-              SIGNATURE=$(printf '%s\n' "$SIG_LINE" | sed -n 's/.*edSignature="\([^"]*\)".*/\1/p')
-              if [ -z "$SIGNATURE" ]; then
+              set +e
+              SIG_OUT=$("$SIGN_UPDATE" --ed-key-file "$KEY_FILE" "$ZIP" 2>&1)
+              sig_status=$?
+              set -e
+              SIGNATURE=$(printf '%s\n' "$SIG_OUT" | sed -n 's/.*edSignature="\([^"]*\)".*/\1/p')
+              if [ "$sig_status" -ne 0 ] || [ -z "$SIGNATURE" ]; then
                 echo "sign_update did not print an edSignature." >&2
+                printf '%s\n' "$SIG_OUT" | redact_private_key >&2
                 exit 1
               fi
               python3 script/update_appcast.py \
@@ -407,6 +507,8 @@ jobs:
                 --link "$REPO_LINK" \
                 --version "$BUILD"
             fi
+            rm -f "$KEY_FILE"
+            EXPECT_ED_SIGNATURE=1
           else
             echo "SPARKLE_PRIVATE_KEY is not set. The appcast has no EdDSA signature, so Sparkle will reject it until a signed release is published."
             python3 script/update_appcast.py \
@@ -420,10 +522,12 @@ jobs:
               --title "Version ${VERSION}"
           fi
           test -f "$APPCAST"
-          python3 - "$APPCAST" "$ZIP_NAME" <<'PY'
+          EXPECT_ED_SIGNATURE="${EXPECT_ED_SIGNATURE:-0}" python3 - "$APPCAST" "$ZIP_NAME" <<'PY'
+          import os
           import sys
           import xml.etree.ElementTree as ET
           path, zip_name = sys.argv[1], sys.argv[2]
+          sparkle_sig = "{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature"
           root = ET.parse(path).getroot()
           items = root.findall("./channel/item")
           if len(items) != 1:
@@ -432,7 +536,12 @@ jobs:
           url = enclosure.get("url") if enclosure is not None else ""
           if not url.endswith("/" + zip_name) or "source" in url:
               sys.exit(f"appcast enclosure is not the app zip: {url}")
-          print(f"appcast enclosure={url}")
+          signature = ""
+          if enclosure is not None:
+              signature = enclosure.get(sparkle_sig) or enclosure.get("edSignature") or ""
+          if os.environ.get("EXPECT_ED_SIGNATURE") == "1" and not signature:
+              sys.exit("appcast enclosure has no edSignature")
+          print(f"appcast enclosure={url} edSignature={'yes' if signature else 'no'}")
           PY
 
       - name: Publish GitHub release

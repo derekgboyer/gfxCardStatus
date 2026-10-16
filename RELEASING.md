@@ -4,13 +4,15 @@ Pull requests and branch pushes run `.github/workflows/build.yml` (universal Rel
 
 Release signing uses `gfxCardStatus.entitlements`, which is empty, plus the hardened runtime. The app stays unsandboxed: GPU switching opens an IOKit user client. Do not put `com.apple.security.get-task-allow` in that file. Debug builds use `gfxCardStatusDebug.entitlements`, which turns off library validation so an ad-hoc local build can load Sparkle. Release builds do not.
 
+The Developer ID job re-signs Sparkle inside-out, with a timestamp, in the order Sparkle documents for distribution outside Xcode's archive export. Stock Sparkle 2.6 and later do not sandbox `Downloader.xpc` unless `DOWNLOADER_SANDBOXED_ENTITLEMENTS` is turned on when Sparkle itself is built. This app does not set `SUEnableDownloaderService`, so that XPC service is not part of the update path. The workflow preserves whatever entitlements the XPC already has. It does not require `com.apple.security.app-sandbox`.
+
 Add these under **Settings → Secrets and variables → Actions**.
 
 ## Variable
 
 | Name | Required | Purpose |
 | --- | --- | --- |
-| `SPARKLE_PUBLIC_ED_KEY` | For update checks on a CI release | EdDSA public key passed into the app as the `SPARKLE_PUBLIC_ED_KEY` build setting. A secret of the same name is used only when this variable is empty |
+| `SPARKLE_PUBLIC_ED_KEY` | For update checks on a CI release | Bare base64 Ed25519 public key passed into the app as the `SPARKLE_PUBLIC_ED_KEY` build setting. A secret of the same name is used only when this variable is empty |
 
 The public key is not a secret. Store it as a variable.
 
@@ -24,7 +26,7 @@ The public key is not a secret. Store it as a variable.
 | `APPLE_API_KEY_ID` | No | App Store Connect API key id, for `notarytool` |
 | `APPLE_API_ISSUER_ID` | No | App Store Connect issuer id |
 | `APPLE_API_KEY` | No | Contents of the `AuthKey_<KEYID>.p8` file, including the BEGIN/END lines |
-| `SPARKLE_PRIVATE_KEY` | For a signed appcast | EdDSA private key passed to `generate_appcast` / `sign_update`. Never commit this |
+| `SPARKLE_PRIVATE_KEY` | For a signed appcast | Single-line base64 EdDSA private key passed to `generate_appcast` / `sign_update`. Never commit this, and do not store it in `SPARKLE_PUBLIC_ED_KEY` |
 | `SPARKLE_PUBLIC_ED_KEY` | No | Fallback only, when the variable above is empty |
 
 The release job publishes with the built-in `GITHUB_TOKEN` (`contents: write`). Do not create a personal access token for that.
@@ -68,15 +70,15 @@ Sparkle/bin/generate_keys
 
 `generate_keys` prints the public key and stores the private key in the login keychain (account `ed25519`, service `https://sparkle-project.org`).
 
-Put the printed public key in the `SPARKLE_PUBLIC_ED_KEY` variable. The release build passes it to `xcodebuild`, which writes it to `SUPublicEDKey`. Xcode and `script/dist` do not read the variable. They keep the key in the Debug and Release build settings, currently `4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=`, and the feed `https://gfx.io/appcasts/$(SU_FEED_CHANNEL).xml`. Change those build settings only when local builds should match the GitHub feed.
+The `SPARKLE_PUBLIC_ED_KEY` variable is the bare base64 public key: the text inside the `<string>` element, not the surrounding `<key>SUPublicEDKey</key>` lines and not the private key. The release workflow also accepts that full snippet and extracts the key. It passes only the bare key to `xcodebuild`, which writes it to `SUPublicEDKey`. Xcode and `script/dist` do not read the variable. They keep the key in the Debug and Release build settings, currently `4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=`, and the feed `https://gfx.io/appcasts/$(SU_FEED_CHANNEL).xml`. Change those build settings only when local builds should match the GitHub feed.
 
-Export the private key and store it as `SPARKLE_PRIVATE_KEY`:
+Export the private key and store that single line of base64 as `SPARKLE_PRIVATE_KEY`:
 
 ```sh
 security find-generic-password -a ed25519 -s "https://sparkle-project.org" -w
 ```
 
-`generate_keys -x private-key-file` writes the same secret to a file. The public key inside the app and the private key that signs `appcast.xml` have to be the pair from the same `generate_keys` run. Do not commit the private key.
+The workflow writes this secret to a temporary file for Sparkle's tools and does not print it. `generate_keys -x private-key-file` writes the same secret to a file. The public key inside the app and the private key that signs `appcast.xml` have to be the pair from the same `generate_keys` run. Do not commit the private key.
 
 ## Cut a release
 
