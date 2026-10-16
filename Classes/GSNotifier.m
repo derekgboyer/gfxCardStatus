@@ -11,11 +11,14 @@
 #import "GSMux.h"
 #import "GSPreferences.h"
 
+#import <UserNotifications/UserNotifications.h>
+
 #define kGPUChangedNotificationKey @"GrowlGPUChanged"
 
 #define kIntegratedOnlyMessageExplanationURL [kApplicationWebsiteURL stringByAppendingString:@"/switching.html#integrated-only-mode-limitations"]
+#define kGPUChangeNotificationIdentifier @"com.codykrieger.gfxCardStatus.gpu-changed"
 
-@interface GSNotifier () <NSUserNotificationCenterDelegate>
+@interface GSNotifier () <UNUserNotificationCenterDelegate>
 - (NSString *)_keyForNotificationType:(GSGPUType)type;
 @end
 
@@ -40,7 +43,15 @@
     if (!(self = [super init]))
         return nil;
 
-    [NSUserNotificationCenter defaultUserNotificationCenter].delegate = self;
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    center.delegate = self;
+    [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
+                          completionHandler:^(BOOL granted, NSError *error) {
+        if (error)
+            GSLogError(@"Notification authorization failed: %@", error);
+        else
+            GSLogDebug(@"Notification authorization granted: %d", granted);
+    }];
 
     return self;
 }
@@ -61,12 +72,19 @@
     // check to make sure the user even wants to see the notifications in the
     // first place.
     if (![message isEqualToString:_lastMessage] && [GSPreferences sharedInstance].shouldDisplayNotifications) {
-        NSUserNotification *notification = [[NSUserNotification alloc] init];
-        notification.hasActionButton = NO;
-        notification.title = title;
-        notification.informativeText = message;
-        notification.identifier = [NSUUID UUID].UUIDString;
-        [[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
+        UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+        content.title = title;
+        content.body = message;
+
+        // A stable identifier replaces the previous GPU notification instead of stacking them.
+        UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:kGPUChangeNotificationIdentifier
+                                                                              content:content
+                                                                              trigger:nil];
+        [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:request
+                                                               withCompletionHandler:^(NSError *error) {
+            if (error)
+                GSLogError(@"Failed to deliver GPU change notification: %@", error);
+        }];
 
         _lastMessage = message;
     }
@@ -116,16 +134,15 @@
         GSOpenURL([NSURL URLWithString:kIntegratedOnlyMessageExplanationURL]);
 }
 
-#pragma mark - NSUserNotificationCenterDelegate protocol
+#pragma mark - UNUserNotificationCenterDelegate
 
-- (void)userNotificationCenter:(NSUserNotificationCenter *)center didDeliverNotification:(NSUserNotification *)notification
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+       willPresentNotification:(UNNotification *)notification
+         withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler
 {
-    [center removeDeliveredNotification:notification];
-}
-
-- (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center shouldPresentNotification:(NSUserNotification *)notification
-{
-    return YES;
+    // gfxCardStatus is a menu bar agent, so it is effectively always "foreground".
+    // Show the banner anyway, matching the old shouldPresentNotification: behavior.
+    completionHandler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList);
 }
 
 #pragma mark - Private helpers
