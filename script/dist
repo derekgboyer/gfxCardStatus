@@ -49,57 +49,23 @@ ditto -ck --keepParent "$APP_PATH" "$ZIP_PATH"
 
 echo "----> zipped: $ZIP_PATH"
 
-NOTARIZE_APP_LOG=$(mktemp -t notarize-app)
-NOTARIZATION_INFO_LOG=$(mktemp -t notarization-info)
-
-finish() {
-	rm "$NOTARIZE_APP_LOG" "$NOTARIZATION_INFO_LOG"
-}
-trap finish EXIT
-
 echo "----> submitting archive for notarization..."
-if ! xcrun altool \
-    --username "$AC_USERNAME" \
+if ! xcrun notarytool submit "$ZIP_PATH" \
+    --apple-id "$AC_USERNAME" \
     --password "$AC_PASSWORD" \
-    --notarize-app \
-    --primary-bundle-id "$BUNDLE_IDENTIFIER" \
     --team-id "$TEAM_ID" \
-    --file "$ZIP_PATH" > "$NOTARIZE_APP_LOG" 2>&1 ; then
+    --wait ; then
 
-    cat "$NOTARIZE_APP_LOG" 1>&2
+    echo "----> FATAL: notarization failed"
     exit 1
 fi
 
-cat "$NOTARIZE_APP_LOG" 1>&2
-REQUEST_UUID=$(awk -F ' = ' '/RequestUUID/ {print $2}' "$NOTARIZE_APP_LOG")
-
-echo "----> polling notarization status every 60s..."
-while sleep 60 && date ; do
-    if ! xcrun altool \
-        --username "$AC_USERNAME" \
-        --password "$AC_PASSWORD" \
-        --notarization-info "$REQUEST_UUID" > "$NOTARIZATION_INFO_LOG" 2>&1 ; then
-
-        cat "$NOTARIZATION_INFO_LOG" 1>&2
-        exit 1
-    fi
-
-    grep "Status: " "$NOTARIZATION_INFO_LOG" ||:
-
-    if ! grep -q "Status: in progress" "$NOTARIZATION_INFO_LOG" ; then
-        cat "$NOTARIZATION_INFO_LOG" 1>&2
-
-        echo "----> stapling notarization ticket to $APP_PATH..."
-        if ! xcrun stapler staple "$APP_PATH" ; then
-            echo "----> FATAL: couldn't staple notarization ticket to $APP_PATH"
-            exit 1
-        else
-            echo "----> notarization ticket stapled successfully"
-        fi
-
-        break
-    fi
-done
+echo "----> stapling notarization ticket to $APP_PATH..."
+if ! xcrun stapler staple "$APP_PATH" ; then
+    echo "----> FATAL: couldn't staple notarization ticket to $APP_PATH"
+    exit 1
+fi
+echo "----> notarization ticket stapled successfully"
 
 echo "----> re-zipping stapled app..."
 rm "$ZIP_PATH"
@@ -110,10 +76,6 @@ PUBDATE=$(LC_TIME=en_US date +"%a, %d %b %G %T %z")
 BASE_URL="https://gfx.io"
 RELEASENOTES_URL="$BASE_URL/release-notes/$VERSION.html"
 DOWNLOAD_URL="https://github.com/codykrieger/gfxCardStatus/releases/download/v$VERSION/$(basename $ZIP_PATH)"
-
-echo "----> signing archive (dsa)..."
-DSA_SIGNATURE="$(script/sign_update_dsa "$ZIP_PATH" "$PWD/dsa_priv.pem")"
-[ $DSA_SIGNATURE ] || { echo "DSA signing failed (unable to load private key?)"; false; }
 
 echo "----> signing archive (ed25519)..."
 ED25519_SIGNATURE="$(script/sign_update "$ZIP_PATH" | sed -E 's/^sparkle:edSignature="(.+)" length=".*"$/\1/g')"
@@ -134,7 +96,6 @@ cat <<EOF
     sparkle:shortVersionString="$VERSION"
     type="application/octet-stream"
     length="$SIZE"
-    sparkle:dsaSignature="$DSA_SIGNATURE"
     sparkle:edSignature="$ED25519_SIGNATURE" />
 </item>
 EOF
