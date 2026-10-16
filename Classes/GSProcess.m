@@ -16,7 +16,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 
-static const CFStringRef kProcTaskKey = (const CFStringRef)__builtin___CFStringMakeConstantString("task-list");
+static const CFStringRef kProcTaskKey = CFSTR("task-list");
 
 static struct kinfo_proc *_procInfo = NULL;
 static size_t _procSize = 0;
@@ -128,10 +128,14 @@ static void _procScan(io_registry_entry_t service, NSMutableArray *arr) {
     if (IOObjectConformsTo(service, "AppleGraphicsControl")) {
         kern_return_t status = IORegistryEntryCreateCFProperties(service, &props, kCFAllocatorDefault, kNilOptions);
         
-        if (status == KERN_SUCCESS && CFGetTypeID(props) == CFDictionaryGetTypeID()) {
-            CFTypeRef array = CFDictionaryGetValue(props, kProcTaskKey);
-            CFRange range = { 0, CFArrayGetCount(array) };
-            CFArrayApplyFunction(array, range, _procTask, (__bridge void *)arr);
+        if (status == KERN_SUCCESS && props != NULL) {
+            if (CFGetTypeID(props) == CFDictionaryGetTypeID()) {
+                CFTypeRef array = CFDictionaryGetValue(props, kProcTaskKey);
+                if (array != NULL && CFGetTypeID(array) == CFArrayGetTypeID() && CFArrayGetCount(array) > 0) {
+                    CFRange range = { 0, CFArrayGetCount(array) };
+                    CFArrayApplyFunction(array, range, _procTask, (__bridge void *)arr);
+                }
+            }
             CFRelease(props);
         }
     }
@@ -167,7 +171,7 @@ static void _procScan(io_registry_entry_t service, NSMutableArray *arr) {
     
     // scan the kernel process list for discrete gpu-using tasks
     io_registry_entry_t service = 0;
-    service = IORegistryGetRootEntry(kIOMasterPortDefault);
+    service = IORegistryGetRootEntry(kIOMainPortDefault);
     if (!service)
         return [NSArray array];
     
