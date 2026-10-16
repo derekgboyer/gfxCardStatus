@@ -14,10 +14,10 @@
 #import "GSMux.h"
 #import "GSNotifier.h"
 
-#import <ReactiveCocoa/ReactiveCocoa.h>
-
 #define kHasSeenOneTimeNotificationKey @"hasSeenVersionTwoMessage"
 #define kShouldCheckForUpdatesOnStartupKeyPath @"prefsDict.shouldCheckForUpdatesOnStartup"
+
+static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
 @implementation gfxCardStatusAppDelegate
 
@@ -89,18 +89,34 @@
     GSLogInfo(@"Appcast URL: %@", _updater.feedURL);
 
     // Hook up the check for updates on startup preference directly to the
-    // automaticallyChecksForUpdates property on the SUUpdater.
+    // automaticallyChecksForUpdates property on the updater.
     _updater.automaticallyChecksForUpdates = _prefs.shouldCheckForUpdatesOnStartup;
-
-    // FIXME: Rip out ReactiveCocoa.
-    [[_prefs rac_signalForKeyPath:kShouldCheckForUpdatesOnStartupKeyPath observer:self] subscribeNext:^(id x) {
-        GSLogDebug(@"Check for updates on startup value changed: %@", x);
-        self->_updater.automaticallyChecksForUpdates = [x boolValue];
-    }];
+    [_prefs addObserver:self
+             forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath
+                options:NSKeyValueObservingOptionNew
+                context:GSShouldCheckForUpdatesContext];
 
     // Check for updates if the user has them enabled.
     if ([_prefs shouldCheckForUpdatesOnStartup])
         [_updater checkForUpdatesInBackground];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+{
+    if (context == GSShouldCheckForUpdatesContext) {
+        id value = change[NSKeyValueChangeNewKey];
+        BOOL enabled = [value isKindOfClass:[NSNumber class]] && [value boolValue];
+        GSLogDebug(@"Check for updates on startup value changed: %@", value);
+        _updater.automaticallyChecksForUpdates = enabled;
+        return;
+    }
+
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+
+- (void)dealloc
+{
+    [_prefs removeObserver:self forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath context:GSShouldCheckForUpdatesContext];
 }
 
 #pragma mark - Termination Notifications

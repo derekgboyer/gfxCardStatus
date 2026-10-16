@@ -15,3 +15,6 @@ ed25519_priv.key
 
 # misc
 /TODO.md
+
+# CocoaPods (no longer used)
+/Pods/

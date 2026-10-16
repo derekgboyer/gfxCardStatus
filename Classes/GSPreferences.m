@@ -28,13 +28,76 @@
 // unreliable. This works all the time, no questions asked.
 #define kPreferencesPlistPath [@"~/Library/Preferences/com.codykrieger.gfxCardStatus-Preferences.plist" stringByExpandingTildeInPath]
 
+// NSMutableDictionary is not KVO-compliant for its keys, which is what the
+// preference checkboxes and the old ReactiveCocoa observers depended on.
+// This object stores the same plist dictionary and notifies on every key.
+@interface GSPreferencesDictionary : NSObject
+- (instancetype)initWithDictionary:(NSDictionary *)dictionary;
+- (id)objectForKeyedSubscript:(NSString *)key;
+- (void)setObject:(id)object forKeyedSubscript:(NSString *)key;
+- (BOOL)writeToURL:(NSURL *)url error:(NSError **)error;
+@end
+
+@implementation GSPreferencesDictionary {
+    NSMutableDictionary *_storage;
+}
+
+- (instancetype)init {
+    return [self initWithDictionary:@{}];
+}
+
+- (instancetype)initWithDictionary:(NSDictionary *)dictionary {
+    self = [super init];
+    if (self)
+        _storage = dictionary ? [dictionary mutableCopy] : [NSMutableDictionary dictionary];
+    return self;
+}
+
+- (id)objectForKey:(NSString *)key {
+    if (key == nil)
+        return nil;
+    return _storage[key];
+}
+
+- (void)setObject:(id)object forKey:(NSString *)key {
+    if (key == nil)
+        return;
+
+    [self willChangeValueForKey:key];
+    if (object)
+        _storage[key] = object;
+    else
+        [_storage removeObjectForKey:key];
+    [self didChangeValueForKey:key];
+}
+
+- (id)objectForKeyedSubscript:(NSString *)key {
+    return [self objectForKey:key];
+}
+
+- (void)setObject:(id)object forKeyedSubscript:(NSString *)key {
+    [self setObject:object forKey:key];
+}
+
+- (id)valueForUndefinedKey:(NSString *)key {
+    return [self objectForKey:key];
+}
+
+- (void)setValue:(id)value forUndefinedKey:(NSString *)key {
+    [self setObject:value forKey:key];
+}
+
+- (BOOL)writeToURL:(NSURL *)url error:(NSError **)error {
+    return [_storage writeToURL:url error:error];
+}
+
+@end
+
 @interface GSPreferences (Internal)
-- (NSString *)_getPrefsPath;
+- (NSURL *)_prefsURL;
 @end
 
 @implementation GSPreferences
-
-@synthesize prefsDict = _prefsDict;
 
 #pragma mark - Initializers
 
@@ -65,15 +128,24 @@
 {
     GSLogDebug(@"Loading preferences and defaults...");
     
-    // Load the preferences dictionary from disk.
-    _prefsDict = [[NSMutableDictionary alloc] initWithContentsOfFile:[self _getPrefsPath]];
-    
-    if (!_prefsDict) {
+    NSDictionary *saved = [NSDictionary dictionaryWithContentsOfURL:[self _prefsURL] error:NULL];
+    if (!saved) {
         // If preferences file doesn't exist, set the defaults.
-        _prefsDict = [[NSMutableDictionary alloc] init];
+        _prefsDict = [[GSPreferencesDictionary alloc] init];
         [self setDefaults];
-    } else
-        _prefsDict[kShouldStartAtLoginKey] = @([GSStartup existsInStartupItems]);
+    } else {
+        _prefsDict = [[GSPreferencesDictionary alloc] initWithDictionary:saved];
+
+        // Login Items remain the source of truth, including a one-time migration
+        // onto SMAppService for people who opted in with the old API.
+        NSNumber *savedLogin = _prefsDict[kShouldStartAtLoginKey];
+        if ([GSStartup existsInStartupItems])
+            _prefsDict[kShouldStartAtLoginKey] = @YES;
+        else if ([savedLogin boolValue])
+            [GSStartup loadAtStartup:YES];
+        else
+            _prefsDict[kShouldStartAtLoginKey] = @NO;
+    }
     
     // Ensure that application will be loaded at startup.
     if ([self shouldStartAtLogin])
@@ -109,11 +181,12 @@
 - (void)savePreferences
 {
     GSLogDebug(@"Writing preferences to disk...");
-    
-    if ([_prefsDict writeToFile:[self _getPrefsPath] atomically:YES])
+
+    NSError *error = nil;
+    if ([_prefsDict writeToURL:[self _prefsURL] error:&error])
         GSLogDebug(@"Successfully wrote preferences to disk.");
     else
-        GSLogDebug(@"Failed to write preferences to disk. Permissions problem in ~/Library/Preferences?");
+        GSLogDebug(@"Failed to write preferences to disk. Permissions problem in ~/Library/Preferences? %@", error);
 }
 
 - (void)setBool:(BOOL)value forKey:(NSString *)key
@@ -144,7 +217,7 @@
 
 - (BOOL)shouldUsePowerSourceBasedSwitching
 {
-    return [_prefsDict [kShouldUsePowerSourceBasedSwitchingKey] boolValue];
+    return [_prefsDict[kShouldUsePowerSourceBasedSwitchingKey] boolValue];
 }
 
 - (BOOL)shouldUseSmartMenuBarIcons
@@ -175,9 +248,9 @@
 
 @implementation GSPreferences (Internal)
 
-- (NSString *)_getPrefsPath
+- (NSURL *)_prefsURL
 {
-    return kPreferencesPlistPath;
+    return [NSURL fileURLWithPath:kPreferencesPlistPath];
 }
 
 @end

@@ -14,9 +14,9 @@
 #import "GSNotifier.h"
 #import "GSProcess.h"
 
-#import <ReactiveCocoa/ReactiveCocoa.h>
-
 #define kShouldUseSmartMenuBarIconsKeyPath @"prefsDict.shouldUseSmartMenuBarIcons"
+
+static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
 
 @interface GSMenuController (Internal)
 - (void)_localizeMenu;
@@ -53,14 +53,28 @@
         return nil;
     
     _prefs = [GSPreferences sharedInstance];
-
-    // FIXME: Rip out ReactiveCocoa.
-    [[_prefs rac_signalForKeyPath:kShouldUseSmartMenuBarIconsKeyPath observer:self] subscribeNext:^(id x) {
-        GSLogDebug(@"Use smart menu bar icons value changed: %@", x);
-        [self updateMenu];
-    }];
+    [_prefs addObserver:self
+             forKeyPath:kShouldUseSmartMenuBarIconsKeyPath
+                options:NSKeyValueObservingOptionNew
+                context:GSSmartMenuBarIconsContext];
     
     return self;
+}
+
+- (void)dealloc
+{
+    [_prefs removeObserver:self forKeyPath:kShouldUseSmartMenuBarIconsKeyPath context:GSSmartMenuBarIconsContext];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+{
+    if (context == GSSmartMenuBarIconsContext) {
+        GSLogDebug(@"Use smart menu bar icons value changed: %@", change[NSKeyValueChangeNewKey]);
+        [self updateMenu];
+        return;
+    }
+
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 }
 
 #pragma mark - GSMenuController API
