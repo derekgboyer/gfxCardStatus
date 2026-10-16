@@ -68,6 +68,10 @@ jobs:
             exit 1
           fi
           python3 script/sparkle_public_ed_key.py --self-test
+          python3 script/normalize_codesign_entitlements.py --self-test
+          python3 script/sparkle_private_key.py --self-test
+          python3 script/verify_release_info_plist.py --self-test
+          python3 script/check_appcast_enclosure.py --self-test
 
       - name: Build Release universal
         run: |
@@ -121,39 +125,7 @@ jobs:
           done
           lipo -info "${FRAMEWORK}/Versions/B/Sparkle" | grep -q arm64
           lipo -info "${FRAMEWORK}/Versions/B/Sparkle" | grep -q x86_64
-          PLIST="${APP}/Contents/Info.plist" python3 - <<'PY'
-          import os, plistlib, subprocess, sys
-          with open(os.environ["PLIST"], "rb") as handle:
-              info = plistlib.load(handle)
-          ok = True
-          expected = {
-              "SUFeedURL": "https://gfx.io/appcasts/release.xml",
-              "SUPublicEDKey": "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=",
-              "CFBundleIdentifier": "com.codykrieger.gfxCardStatus",
-          }
-          for key, want in expected.items():
-              value = info.get(key, "")
-              if value != want:
-                  print(f"{key}={value!r}, expected {want!r}", file=sys.stderr)
-                  ok = False
-          for key in ("SUFeedURL", "SUPublicEDKey", "CFBundleVersion", "CFBundleShortVersionString", "LSMinimumSystemVersion"):
-              value = info.get(key, "")
-              if not isinstance(value, str) or not value or "$(" in value:
-                  print(f"{key} is missing or was not expanded: {value!r}", file=sys.stderr)
-                  ok = False
-          count = int(subprocess.check_output(["git", "rev-list", "--count", "HEAD"], text=True).strip())
-          build = info.get("CFBundleVersion", "")
-          expected_build = str(5000 + count)
-          if build != expected_build:
-              print(f"CFBundleVersion={build!r}, expected {expected_build} (5000 + {count} commits)", file=sys.stderr)
-              ok = False
-          if info.get("LSUIElement") is not True:
-              print("LSUIElement is not true", file=sys.stderr)
-              ok = False
-          print(f"SUFeedURL={info.get('SUFeedURL')}")
-          print(f"CFBundleVersion={build}")
-          sys.exit(0 if ok else 1)
-          PY
+          PLIST="${APP}/Contents/Info.plist" python3 script/verify_build_info_plist.py
           # Hardened runtime is the runtime codesign flag (0x10000).
           codesign -d --verbose=2 "${APP}" 2>&1 | grep -E -q 'flags=.*runtime'
           set +e
