@@ -46,8 +46,22 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
-          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -n 's/.*"\(Developer ID Application:[^"]*\)"/\1/p' | head -1)
+          # Quote each existing keychain. The unquoted command substitution
+          # split on spaces and dropped a path that contains whitespace.
+          security list-keychains -d user > "$RUNNER_TEMP/user-keychains.txt"
+          keychains=("$KEYCHAIN_PATH")
+          while IFS= read -r chain; do
+            chain=${chain//\"/}
+            chain="${chain#"${chain%%[![:space:]]*}"}"
+            chain="${chain%"${chain##*[![:space:]]}"}"
+            if [ -n "$chain" ]; then
+              keychains+=("$chain")
+            fi
+          done < "$RUNNER_TEMP/user-keychains.txt"
+          security list-keychains -d user -s "${keychains[@]}"
+          # sed prints every match and exits 0. head -1 would SIGPIPE sed
+          # under pipefail when more than one identity is present.
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -n 's/.*"\(Developer ID Application:[^"]*\)"/\1/p' | sed -n '1p')
           if [ -z "$IDENTITY" ]; then
             echo "The imported certificate has no Developer ID Application identity."
             security find-identity -v -p codesigning "$KEYCHAIN_PATH"
@@ -102,29 +116,7 @@ jobs:
           test -d "$APP"
           lipo -info "$BINARY" | grep -q arm64
           lipo -info "$BINARY" | grep -q x86_64
-          PLIST="${APP}/Contents/Info.plist" python3 - <<'PY'
-          import os, plistlib, sys
-          with open(os.environ["PLIST"], "rb") as handle:
-              info = plistlib.load(handle)
-          feed = info.get("SUFeedURL", "")
-          key = info.get("SUPublicEDKey", "")
-          want_feed = os.environ["FEED_URL"]
-          override = os.environ.get("SPARKLE_PUBLIC_ED_KEY", "").strip()
-          want_key = override or "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao="
-          source = "repository variable" if override else "project default"
-          ok = True
-          if feed != want_feed or not isinstance(feed, str) or "$(" in feed:
-              print(f"SUFeedURL={feed!r}, expected {want_feed!r}", file=sys.stderr)
-              ok = False
-          if key != want_key or not isinstance(key, str) or "$(" in key:
-              print("SUPublicEDKey was not the expected key.", file=sys.stderr)
-              print(f"SUPublicEDKey in Info.plist={key!r}", file=sys.stderr)
-              print(f"expected {want_key!r} ({source})", file=sys.stderr)
-              ok = False
-          print(f"SUFeedURL={feed}")
-          print(f"SUPublicEDKey source={source}")
-          sys.exit(0 if ok else 1)
-          PY
+          PLIST="${APP}/Contents/Info.plist" python3 script/verify_release_info_plist.py
           if [ "${{ steps.sign.outputs.mode }}" = "developer-id" ]; then
             # Sign inside-out, in the order Sparkle documents for Developer ID
             # distribution outside Xcode's archive export. codesign --deep is not
@@ -162,14 +154,7 @@ jobs:
               codesign -d --entitlements - "$1" 2>/dev/null || true
             }
             normalize_ents() {
-              printf '%s\n' "$1" | python3 -c '
-import sys
-lines = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip() and not ln.startswith("Executable=")]
-if not lines or lines == ["[Dict]"]:
-    sys.stdout.write("empty\n")
-else:
-    sys.stdout.write("\n".join(lines) + "\n")
-'
+              printf '%s\n' "$1" | python3 script/normalize_codesign_entitlements.py
             }
             sign_runtime() {
               echo "Signing ${1}"
@@ -376,14 +361,16 @@ else:
           git archive --format=tar.gz --prefix="gfxCardStatus-${VERSION}/" -o "$SOURCE_TGZ" "${GITHUB_SHA}"
           README_MD="$DIST/README.md"
           cp README.md "$README_MD"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
-          echo "min_os=$MIN_OS" >> "$GITHUB_OUTPUT"
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
-          echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
-          echo "source_zip=$SOURCE_ZIP" >> "$GITHUB_OUTPUT"
-          echo "source_tgz=$SOURCE_TGZ" >> "$GITHUB_OUTPUT"
-          echo "readme=$README_MD" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "build=$BUILD"
+            echo "min_os=$MIN_OS"
+            echo "zip=$ZIP"
+            echo "dmg=$DMG"
+            echo "source_zip=$SOURCE_ZIP"
+            echo "source_tgz=$SOURCE_TGZ"
+            echo "readme=$README_MD"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build Sparkle appcast
         env:
@@ -434,34 +421,33 @@ else:
             rm -f "$KEY_FILE"
             cleanup_private_key() { rm -f "$KEY_FILE"; }
             trap cleanup_private_key EXIT
-            printf '%s' "$SPARKLE_PRIVATE_KEY" | KEY_FILE="$KEY_FILE" python3 -c '
-import os, sys
-from pathlib import Path
-raw = sys.stdin.read().strip()
-lines = [line.strip() for line in raw.splitlines() if line.strip()]
-if len(lines) != 1:
-    sys.exit("SPARKLE_PRIVATE_KEY must be the single-line base64 EdDSA private key from generate_keys. The value was not printed.")
-path = Path(os.environ["KEY_FILE"])
-path.write_text(lines[0] + "\n", encoding="utf-8")
-os.chmod(path, 0o600)
-'
+            printf '%s' "$SPARKLE_PRIVATE_KEY" | python3 script/sparkle_private_key.py write "$KEY_FILE"
             redact_private_key() {
-              python3 -c '
-import os, sys
-text = sys.stdin.read()
-secret = os.environ.get("SPARKLE_PRIVATE_KEY", "")
-for line in secret.splitlines():
-    token = line.strip()
-    if len(token) >= 16:
-        text = text.replace(token, "[redacted]")
-sys.stdout.write(text)
-'
+              python3 script/sparkle_private_key.py redact
             }
             curl -fsSL -o "${RUNNER_TEMP}/Sparkle.tar.xz" "https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz"
             mkdir -p "${RUNNER_TEMP}/Sparkle"
             tar -xf "${RUNNER_TEMP}/Sparkle.tar.xz" -C "${RUNNER_TEMP}/Sparkle"
-            GENERATE=$(find "${RUNNER_TEMP}/Sparkle" -name generate_appcast -type f | head -1)
-            SIGN_UPDATE=$(find "${RUNNER_TEMP}/Sparkle" -name sign_update -type f | head -1)
+            # Do not use find | head. Under pipefail, head closes the pipe and
+            # find exits with SIGPIPE, which fails the step.
+            TOOL_LIST="${RUNNER_TEMP}/sparkle-tools.txt"
+            find "${RUNNER_TEMP}/Sparkle" -type f \( -name generate_appcast -o -name sign_update \) > "$TOOL_LIST"
+            GENERATE=""
+            SIGN_UPDATE=""
+            while IFS= read -r sparkle_tool; do
+              case "$(basename "$sparkle_tool")" in
+                generate_appcast)
+                  if [ -z "$GENERATE" ]; then
+                    GENERATE=$sparkle_tool
+                  fi
+                  ;;
+                sign_update)
+                  if [ -z "$SIGN_UPDATE" ]; then
+                    SIGN_UPDATE=$sparkle_tool
+                  fi
+                  ;;
+              esac
+            done < "$TOOL_LIST"
             if [ -z "$GENERATE" ] || [ -z "$SIGN_UPDATE" ]; then
               echo "Sparkle tools archive did not contain generate_appcast and sign_update."
               exit 1
@@ -522,27 +508,7 @@ sys.stdout.write(text)
               --title "Version ${VERSION}"
           fi
           test -f "$APPCAST"
-          EXPECT_ED_SIGNATURE="${EXPECT_ED_SIGNATURE:-0}" python3 - "$APPCAST" "$ZIP_NAME" <<'PY'
-          import os
-          import sys
-          import xml.etree.ElementTree as ET
-          path, zip_name = sys.argv[1], sys.argv[2]
-          sparkle_sig = "{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature"
-          root = ET.parse(path).getroot()
-          items = root.findall("./channel/item")
-          if len(items) != 1:
-              sys.exit(f"appcast has {len(items)} items, expected 1")
-          enclosure = items[0].find("enclosure")
-          url = enclosure.get("url") if enclosure is not None else ""
-          if not url.endswith("/" + zip_name) or "source" in url:
-              sys.exit(f"appcast enclosure is not the app zip: {url}")
-          signature = ""
-          if enclosure is not None:
-              signature = enclosure.get(sparkle_sig) or enclosure.get("edSignature") or ""
-          if os.environ.get("EXPECT_ED_SIGNATURE") == "1" and not signature:
-              sys.exit("appcast enclosure has no edSignature")
-          print(f"appcast enclosure={url} edSignature={'yes' if signature else 'no'}")
-          PY
+          EXPECT_ED_SIGNATURE="${EXPECT_ED_SIGNATURE:-0}" python3 script/check_appcast_enclosure.py "$APPCAST" "$ZIP_NAME"
 
       - name: Publish GitHub release
         env:
