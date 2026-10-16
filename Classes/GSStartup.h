@@ -8,9 +8,12 @@
 
 @interface GSStartup : NSObject
 
-// Whether or not the app exists in the current user's Login Items list.
+// Whether or not the app is registered as a login item via SMAppService.
+// Requires Approval still counts: the user asked for it, and macOS is waiting
+// on System Settings → General → Login Items.
 + (BOOL)existsInStartupItems;
-// Put the app in the current user's Login Items list.
+
+// Register or unregister this app as a login item.
 + (void)loadAtStartup:(BOOL)value;
 
 @end
