@@ -13,12 +13,17 @@
 // Unfortunately this value needs to stay misspelled unless there is a desire to
 // migrate it to a correctly spelled version instead, since getting and setting
 // the existing preferences depend on it.
-#define kPowerSourceBasedSwitchingACMode        @"GPUSetting_ACAdaptor"
-#define kPowerSourceBasedSwitchingBatteryMode   @"GPUSetting_Battery"
+NSString * const GSPowerSourceBasedSwitchingACModeKey = @"GPUSetting_ACAdaptor";
+NSString * const GSPowerSourceBasedSwitchingBatteryModeKey = @"GPUSetting_Battery";
+NSString * const GSShouldUsePowerSourceBasedSwitchingKey = @"shouldUsePowerSourceBasedSwitching";
+
+// Written once so an old "feature was on" value cannot start switching GPUs
+// again after the feature comes back. The feature stays off until this copy
+// of the app saves an explicit choice.
+static NSString * const kPowerSourceSwitchingInitializedKey = @"powerSourceBasedSwitchingInitialized";
 
 #define kShouldStartAtLoginKey                  @"shouldStartAtLogin"
 #define kShouldCheckForUpdatesOnStartupKey      @"shouldCheckForUpdatesOnStartup"
-#define kShouldUsePowerSourceBasedSwitchingKey  @"shouldUsePowerSourceBasedSwitching"
 #define kShouldUseSmartMenuBarIconsKey          @"shouldUseSmartMenuBarIcons"
 
 // This used to be called "shouldGrowl"
@@ -95,6 +100,10 @@
 
 @interface GSPreferences (Internal)
 - (NSURL *)_prefsURL;
+- (BOOL)_ensurePowerSourcePreferences;
+- (BOOL)_normalizeModeForKey:(NSString *)key fallback:(GSPowerSourceBasedSwitchingMode)fallback;
+- (GSPowerSourceBasedSwitchingMode)_modeForKey:(NSString *)key
+                                      fallback:(GSPowerSourceBasedSwitchingMode)fallback;
 @end
 
 @implementation GSPreferences
@@ -145,6 +154,9 @@
             [GSStartup loadAtStartup:YES];
         else
             _prefsDict[kShouldStartAtLoginKey] = @NO;
+
+        if ([self _ensurePowerSourcePreferences])
+            [self savePreferences];
     }
     
     // Ensure that application will be loaded at startup.
@@ -166,14 +178,16 @@
     _prefsDict[kShouldCheckForUpdatesOnStartupKey] = @YES;
     _prefsDict[kShouldStartAtLoginKey] = @YES;
     _prefsDict[kShouldDisplayNotificationsKey] = @YES;
-    _prefsDict[kShouldUsePowerSourceBasedSwitchingKey] = @NO;
     _prefsDict[kShouldUseSmartMenuBarIconsKey] = @NO;
-    
-    _prefsDict[kPowerSourceBasedSwitchingBatteryMode] = @(GSPowerSourceBasedSwitchingModeIntegrated);
+
+    // Off until the user opts in, including on a brand new preferences file.
+    _prefsDict[GSShouldUsePowerSourceBasedSwitchingKey] = @NO;
+    _prefsDict[kPowerSourceSwitchingInitializedKey] = @YES;
+    _prefsDict[GSPowerSourceBasedSwitchingBatteryModeKey] = @(GSPowerSourceBasedSwitchingModeIntegrated);
     if ([GSGPU isLegacyMachine])
-        _prefsDict[kPowerSourceBasedSwitchingACMode] = @(GSPowerSourceBasedSwitchingModeDiscrete);
+        _prefsDict[GSPowerSourceBasedSwitchingACModeKey] = @(GSPowerSourceBasedSwitchingModeDiscrete);
     else
-        _prefsDict[kPowerSourceBasedSwitchingACMode] = @(GSPowerSourceBasedSwitchingModeDynamic);
+        _prefsDict[GSPowerSourceBasedSwitchingACModeKey] = @(GSPowerSourceBasedSwitchingModeDynamic);
     
     [self savePreferences];
 }
@@ -217,7 +231,7 @@
 
 - (BOOL)shouldUsePowerSourceBasedSwitching
 {
-    return [_prefsDict[kShouldUsePowerSourceBasedSwitchingKey] boolValue];
+    return [_prefsDict[GSShouldUsePowerSourceBasedSwitchingKey] boolValue];
 }
 
 - (BOOL)shouldUseSmartMenuBarIcons
@@ -227,12 +241,34 @@
 
 - (GSPowerSourceBasedSwitchingMode)modeForACAdapter
 {
-    return [_prefsDict[kPowerSourceBasedSwitchingACMode] intValue];
+    GSPowerSourceBasedSwitchingMode fallback = [GSGPU isLegacyMachine]
+        ? GSPowerSourceBasedSwitchingModeDiscrete
+        : GSPowerSourceBasedSwitchingModeDynamic;
+    return [self _modeForKey:GSPowerSourceBasedSwitchingACModeKey fallback:fallback];
 }
 
 - (GSPowerSourceBasedSwitchingMode)modeForBattery
 {
-    return [_prefsDict[kPowerSourceBasedSwitchingBatteryMode] intValue];
+    return [self _modeForKey:GSPowerSourceBasedSwitchingBatteryModeKey
+                    fallback:GSPowerSourceBasedSwitchingModeIntegrated];
+}
+
+- (void)setPowerSourceBasedSwitchingMode:(GSPowerSourceBasedSwitchingMode)mode
+                           forPowerSource:(GSPowerSource)source
+{
+    if (mode < GSPowerSourceBasedSwitchingModeIntegrated || mode > GSPowerSourceBasedSwitchingModeDontChange)
+        return;
+
+    NSString *key = nil;
+    if (source == GSPowerSourceBattery)
+        key = GSPowerSourceBasedSwitchingBatteryModeKey;
+    else if (source == GSPowerSourceACAdapter)
+        key = GSPowerSourceBasedSwitchingACModeKey;
+    else
+        return;
+
+    _prefsDict[key] = @(mode);
+    [self savePreferences];
 }
 
 #pragma mark - NSWindowDelegate protocol
@@ -251,6 +287,61 @@
 - (NSURL *)_prefsURL
 {
     return [NSURL fileURLWithPath:kPreferencesPlistPath];
+}
+
+// Fills in anything an older preferences file does not have. A stored YES
+// from before the feature was removed is forced back to NO once, so upgrading
+// does not start switching GPUs on its own.
+- (BOOL)_ensurePowerSourcePreferences
+{
+    BOOL dirty = NO;
+
+    if (![_prefsDict[kPowerSourceSwitchingInitializedKey] boolValue]) {
+        _prefsDict[GSShouldUsePowerSourceBasedSwitchingKey] = @NO;
+        _prefsDict[kPowerSourceSwitchingInitializedKey] = @YES;
+        dirty = YES;
+    } else if (_prefsDict[GSShouldUsePowerSourceBasedSwitchingKey] == nil) {
+        _prefsDict[GSShouldUsePowerSourceBasedSwitchingKey] = @NO;
+        dirty = YES;
+    }
+
+    if ([self _normalizeModeForKey:GSPowerSourceBasedSwitchingBatteryModeKey
+                          fallback:GSPowerSourceBasedSwitchingModeIntegrated])
+        dirty = YES;
+
+    GSPowerSourceBasedSwitchingMode acFallback = [GSGPU isLegacyMachine]
+        ? GSPowerSourceBasedSwitchingModeDiscrete
+        : GSPowerSourceBasedSwitchingModeDynamic;
+    if ([self _normalizeModeForKey:GSPowerSourceBasedSwitchingACModeKey fallback:acFallback])
+        dirty = YES;
+
+    return dirty;
+}
+
+- (BOOL)_normalizeModeForKey:(NSString *)key fallback:(GSPowerSourceBasedSwitchingMode)fallback
+{
+    id value = _prefsDict[key];
+    if ([value isKindOfClass:[NSNumber class]]) {
+        int mode = [value intValue];
+        if (mode >= GSPowerSourceBasedSwitchingModeIntegrated && mode <= GSPowerSourceBasedSwitchingModeDontChange)
+            return NO;
+    }
+
+    _prefsDict[key] = @(fallback);
+    return YES;
+}
+
+- (GSPowerSourceBasedSwitchingMode)_modeForKey:(NSString *)key
+                                      fallback:(GSPowerSourceBasedSwitchingMode)fallback
+{
+    id value = _prefsDict[key];
+    if (![value isKindOfClass:[NSNumber class]])
+        return fallback;
+
+    int mode = [value intValue];
+    if (mode < GSPowerSourceBasedSwitchingModeIntegrated || mode > GSPowerSourceBasedSwitchingModeDontChange)
+        return fallback;
+    return (GSPowerSourceBasedSwitchingMode)mode;
 }
 
 @end

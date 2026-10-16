@@ -36,6 +36,8 @@
 		A1ED2D1B158859DE00B99CDE /* GSStartup.m in Sources */ = {isa = PBXBuildFile; fileRef = A1ED2D1A158859DE00B99CDE /* GSStartup.m */; };
 		A1ED2D1F15885D6A00B99CDE /* GSNotifier.m in Sources */ = {isa = PBXBuildFile; fileRef = A1ED2D1E15885D6900B99CDE /* GSNotifier.m */; };
 		A1ED2D22158860FB00B99CDE /* GSMenuController.m in Sources */ = {isa = PBXBuildFile; fileRef = A1ED2D21158860FA00B99CDE /* GSMenuController.m */; };
+		C0FFEE000000000000000023 /* GSPowerPolicy.c in Sources */ = {isa = PBXBuildFile; fileRef = C0FFEE000000000000000022 /* GSPowerPolicy.c */; };
+		C0FFEE000000000000000026 /* GSPowerSourceController.m in Sources */ = {isa = PBXBuildFile; fileRef = C0FFEE000000000000000025 /* GSPowerSourceController.m */; };
 /* End PBXBuildFile section */
 
 
@@ -115,6 +117,10 @@
 		A1ED2D20158860F900B99CDE /* GSMenuController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GSMenuController.h; sourceTree = "<group>"; };
 		A1ED2D21158860FA00B99CDE /* GSMenuController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GSMenuController.m; sourceTree = "<group>"; };
 		A1F4FB0F13C6D58B002D38D5 /* cs */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = cs; path = cs.lproj/Localizable.strings; sourceTree = "<group>"; };
+		C0FFEE000000000000000021 /* GSPowerPolicy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GSPowerPolicy.h; sourceTree = "<group>"; };
+		C0FFEE000000000000000022 /* GSPowerPolicy.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = GSPowerPolicy.c; sourceTree = "<group>"; };
+		C0FFEE000000000000000024 /* GSPowerSourceController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GSPowerSourceController.h; sourceTree = "<group>"; };
+		C0FFEE000000000000000025 /* GSPowerSourceController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GSPowerSourceController.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -231,6 +237,10 @@
 				A1ED2B9E1588457400B99CDE /* GSGPU.m */,
 				A17CE49813B07C3700E5D50F /* GSProcess.h */,
 				A17CE49913B07C3700E5D50F /* GSProcess.m */,
+				C0FFEE000000000000000021 /* GSPowerPolicy.h */,
+				C0FFEE000000000000000022 /* GSPowerPolicy.c */,
+				C0FFEE000000000000000024 /* GSPowerSourceController.h */,
+				C0FFEE000000000000000025 /* GSPowerSourceController.m */,
 				A1ED2D19158859DE00B99CDE /* GSStartup.h */,
 				A1ED2D1A158859DE00B99CDE /* GSStartup.m */,
 			);
@@ -442,6 +452,8 @@
 				A1ED2D1B158859DE00B99CDE /* GSStartup.m in Sources */,
 				A1ED2D1F15885D6A00B99CDE /* GSNotifier.m in Sources */,
 				A1ED2D22158860FB00B99CDE /* GSMenuController.m in Sources */,
+				C0FFEE000000000000000023 /* GSPowerPolicy.c in Sources */,
+				C0FFEE000000000000000026 /* GSPowerSourceController.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -17,6 +17,7 @@
 
 #define kIntegratedOnlyMessageExplanationURL [kApplicationWebsiteURL stringByAppendingString:@"/switching.html#integrated-only-mode-limitations"]
 #define kGPUChangeNotificationIdentifier @"com.codykrieger.gfxCardStatus.gpu-changed"
+#define kPowerRuleBlockedNotificationIdentifier @"com.codykrieger.gfxCardStatus.power-rule-blocked"
 
 @interface GSNotifier () <UNUserNotificationCenterDelegate>
 - (NSString *)_keyForNotificationType:(GSGPUType)type;
@@ -134,6 +135,37 @@
 
     if ([alert runModal] == NSAlertSecondButtonReturn)
         GSOpenURL([NSURL URLWithString:kIntegratedOnlyMessageExplanationURL]);
+}
+
+- (void)showPowerRuleBlockedNotification:(NSArray *)taskNames
+{
+    NSString *list = [taskNames componentsJoinedByString:@", "];
+    NSString *body = Str(@"PowerRuleBlocked");
+    if (list.length)
+        body = [NSString stringWithFormat:@"%@\n%@", body, list];
+
+    NSString *title = Str(@"IntegratedOnly");
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    // Authorization is requested when the notifier is created, but that
+    // completion can still be in flight if a rule trips during launch.
+    [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
+                          completionHandler:^(BOOL granted, NSError *error) {
+        if (error || !granted) {
+            GSLogError(@"Power-source notification not shown (granted=%d): %@", granted, error);
+            return;
+        }
+
+        UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+        content.title = title;
+        content.body = body;
+        UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:kPowerRuleBlockedNotificationIdentifier
+                                                                              content:content
+                                                                              trigger:nil];
+        [center addNotificationRequest:request withCompletionHandler:^(NSError *addError) {
+            if (addError)
+                GSLogError(@"Failed to deliver power-source notification: %@", addError);
+        }];
+    }];
 }
 
 #pragma mark - UNUserNotificationCenterDelegate

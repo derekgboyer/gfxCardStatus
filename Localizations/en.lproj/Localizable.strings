@@ -42,6 +42,13 @@
 "Switching"             = "Switching";
 "Advanced"              = "Advanced";
 "SmartMenuBarIcons"     = "Use smart menu bar icons";
+"DontChange"            = "Don't Change";
+"ManualOverride"        = "manual";
+"UnknownPowerSource"    = "Unknown";
+"PowerBasedSwitchingHelp" = "When this is on, gfxCardStatus applies the choice for the power source you are using. On Battery and Plugged In can each be Integrated Only, Discrete Only, Dynamic Switching, or Don't Change.\n\nA mode you pick in the status menu stays in effect until you plug in or unplug. Turning this on, or changing the choice for the power source you are on now, applies immediately. Don't Change leaves the GPU alone. Integrated Only is skipped while an external display or an app is using the discrete GPU, and that attempt is not retried until the next power change.\n\nQuitting gfxCardStatus still returns the Mac to Dynamic Switching.";
+"PowerSwitchingUnsupported" = "Power source-based switching is unavailable because this Mac cannot switch GPUs.";
+"PowerSwitchingUnsupportedLegacy" = "Power source-based switching is unavailable on this Mac. It can toggle GPUs, but it does not support Integrated Only, Discrete Only, and Dynamic Switching.";
+"PowerRuleBlocked"      = "Integrated Only was not applied because the discrete GPU is still in use. The rule will be tried again the next time the power source changes.";
 
 /* About box */
 "AboutTitle"			= "About gfxCardStatus";
