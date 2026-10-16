@@ -50,7 +50,7 @@
 
 - (IBAction)whyButtonClicked:(id)sender
 {
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:kPowerSourceBasedSwitchingExplanationURL]];
+    GSOpenURL([NSURL URLWithString:kPowerSourceBasedSwitchingExplanationURL]);
 }
 
 @end

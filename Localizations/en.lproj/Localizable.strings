@@ -15,6 +15,7 @@
 "IntegratedOnly"		= "Integrated Only";
 "DiscreteOnly"			= "Discrete Only";
 "DynamicSwitching"		= "Dynamic Switching";
+"GPUSwitchingUnavailable" = "GPU switching unavailable";
 "Dependencies"			= "Dependencies";
 "NoProcess"				= "None";
 "Quit"					= "Quit";
@@ -57,6 +58,9 @@
 
 /* Unsupported machine box */
 "UnsupportedMachine"    = "You are using a system that gfxCardStatus does not support. Please ensure that you are using a MacBook Pro with dual GPUs.";
+"UnsupportedMachineMessage" = "gfxCardStatus will stay open, but GPU switching controls are disabled on this Mac.";
+"AppleSiliconUnsupported" = "GPU switching isn't available on Apple silicon.";
+"AppleSiliconUnsupportedMessage" = "This Mac uses Apple silicon and doesn't have separate integrated and discrete GPUs to switch between. gfxCardStatus will stay in the menu bar, with switching controls disabled.";
 "OhISee"                = "Oh, I see.";
 
 /* Miscellaneous notifications */

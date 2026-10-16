@@ -10,6 +10,9 @@
 #import "GSMux.h"
 #import "GSPreferences.h"
 
+#import <IOKit/IOKitLib.h>
+#import <sys/sysctl.h>
+
 #define kIOPCIDevice                "IOPCIDevice"
 #define kIONameKey                  "IOName"
 #define kDisplayKey                 "display"
@@ -86,7 +89,7 @@ static void _displayReconfigurationCallback(CGDirectDisplayID display, CGDisplay
     CFMutableDictionaryRef devices = IOServiceMatching(kIOPCIDevice);
     io_iterator_t entryIterator;
     
-    if (IOServiceGetMatchingServices(kIOMasterPortDefault, devices, &entryIterator) == kIOReturnSuccess) {
+    if (IOServiceGetMatchingServices(kIOMainPortDefault, devices, &entryIterator) == kIOReturnSuccess) {
         io_registry_entry_t device;
         
         while ((device = IOIteratorNext(entryIterator))) {
@@ -107,13 +110,22 @@ static void _displayReconfigurationCallback(CGDirectDisplayID display, CGDisplay
                 // convert into a string.
                 if (CFGetTypeID(ioName) == CFStringGetTypeID() && CFStringCompare(ioName, CFSTR(kDisplayKey), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
                     const void *model = CFDictionaryGetValue(serviceDictionary, @kModelKey);
-                    NSString *gpuName = [[NSString alloc] initWithUTF8String:[(__bridge NSData *)model bytes]];
-                    [_cachedGPUs addObject:gpuName];
+                    if (model && CFGetTypeID(model) == CFDataGetTypeID()) {
+                        const UInt8 *bytes = CFDataGetBytePtr(model);
+                        if (bytes != NULL) {
+                            NSString *gpuName = [[NSString alloc] initWithUTF8String:(const char *)bytes];
+                            if (gpuName != nil)
+                                [_cachedGPUs addObject:gpuName];
+                        }
+                    }
                 }
             }
             
             CFRelease(serviceDictionary);
+            IOObjectRelease(device);
         }
+
+        IOObjectRelease(entryIterator);
     }
     
     return _cachedGPUs;
@@ -163,6 +175,16 @@ static void _displayReconfigurationCallback(CGDirectDisplayID display, CGDisplay
     }
     
     return _cachedDiscreteGPUName;
+}
+
++ (BOOL)isAppleSiliconMac
+{
+    // True for native arm64 and for an x86_64 slice running under Rosetta.
+    int arm64 = 0;
+    size_t size = sizeof(arm64);
+    if (sysctlbyname("hw.optional.arm64", &arm64, &size, NULL, 0) != 0)
+        return NO;
+    return arm64 != 0;
 }
 
 + (BOOL)isLegacyMachine

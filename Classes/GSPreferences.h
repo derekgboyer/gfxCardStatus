@@ -14,14 +14,13 @@ typedef enum {
     GSPowerSourceBasedSwitchingModeDynamic = 2
 } GSPowerSourceBasedSwitchingMode;
 
-@interface GSPreferences : NSObject <NSWindowDelegate> {
-    NSMutableDictionary *_prefsDict;
-    
-    NSNumber *yesNumber;
-    NSNumber *noNumber;
-}
+@class GSPreferencesDictionary;
 
-@property (strong) NSMutableDictionary *prefsDict;
+@interface GSPreferences : NSObject <NSWindowDelegate>
+
+// KVO-compliant map of preference keys. Cocoa bindings and observers use
+// key paths such as "prefsDict.shouldStartAtLogin".
+@property (strong) GSPreferencesDictionary *prefsDict;
 
 - (void)setUpPreferences;
 - (void)setDefaults;

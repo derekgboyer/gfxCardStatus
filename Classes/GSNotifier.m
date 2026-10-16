@@ -11,11 +11,14 @@
 #import "GSMux.h"
 #import "GSPreferences.h"
 
+#import <UserNotifications/UserNotifications.h>
+
 #define kGPUChangedNotificationKey @"GrowlGPUChanged"
 
 #define kIntegratedOnlyMessageExplanationURL [kApplicationWebsiteURL stringByAppendingString:@"/switching.html#integrated-only-mode-limitations"]
+#define kGPUChangeNotificationIdentifier @"com.codykrieger.gfxCardStatus.gpu-changed"
 
-@interface GSNotifier () <NSUserNotificationCenterDelegate>
+@interface GSNotifier () <UNUserNotificationCenterDelegate>
 - (NSString *)_keyForNotificationType:(GSGPUType)type;
 @end
 
@@ -40,7 +43,15 @@
     if (!(self = [super init]))
         return nil;
 
-    [NSUserNotificationCenter defaultUserNotificationCenter].delegate = self;
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    center.delegate = self;
+    [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
+                          completionHandler:^(BOOL granted, NSError *error) {
+        if (error)
+            GSLogError(@"Notification authorization failed: %@", error);
+        else
+            GSLogDebug(@"Notification authorization granted: %d", granted);
+    }];
 
     return self;
 }
@@ -61,12 +72,19 @@
     // check to make sure the user even wants to see the notifications in the
     // first place.
     if (![message isEqualToString:_lastMessage] && [GSPreferences sharedInstance].shouldDisplayNotifications) {
-        NSUserNotification *notification = [[NSUserNotification alloc] init];
-        notification.hasActionButton = NO;
-        notification.title = title;
-        notification.informativeText = message;
-        notification.identifier = [NSUUID UUID].UUIDString;
-        [[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
+        UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+        content.title = title;
+        content.body = message;
+
+        // A stable identifier replaces the previous GPU notification instead of stacking them.
+        UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:kGPUChangeNotificationIdentifier
+                                                                              content:content
+                                                                              trigger:nil];
+        [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:request
+                                                               withCompletionHandler:^(NSError *error) {
+            if (error)
+                GSLogError(@"Failed to deliver GPU change notification: %@", error);
+        }];
 
         _lastMessage = message;
     }
@@ -75,25 +93,28 @@
 - (void)showOneTimeNotification
 {
     NSAlert *versionInfo = [[NSAlert alloc] init];
-    [versionInfo setMessageText:Str(@"ThanksForDownloading")];
-    [versionInfo setInformativeText:Str(@"PleaseConsiderDonating")];
+    versionInfo.messageText = Str(@"ThanksForDownloading");
+    versionInfo.informativeText = Str(@"PleaseConsiderDonating");
     NSTextView *accessory = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 300, 15)];
-    [accessory insertText:[NSAttributedString hyperlinkFromString:kApplicationWebsiteURL
-                                                          withURL:[NSURL URLWithString:kApplicationWebsiteURL]]];
-    [accessory setEditable:NO];
-    [accessory setDrawsBackground:NO];
-    [versionInfo setAccessoryView:accessory];
+    NSAttributedString *link = [NSAttributedString hyperlinkFromString:kApplicationWebsiteURL
+                                                                withURL:[NSURL URLWithString:kApplicationWebsiteURL]];
+    [accessory.textStorage setAttributedString:link];
+    accessory.editable = NO;
+    accessory.drawsBackground = NO;
+    accessory.selectable = YES;
+    versionInfo.accessoryView = accessory;
     [versionInfo addButtonWithTitle:Str(@"DontShowAgain")];
     [versionInfo runModal];
 }
 
-- (void)showUnsupportedMachineMessage
+- (void)showGPUSwitchingUnavailableMessage
 {
-    NSAlert *alert = [NSAlert alertWithMessageText:Str(@"UnsupportedMachine")
-                                     defaultButton:Str(@"OhISee")
-                                   alternateButton:nil 
-                                       otherButton:nil 
-                         informativeTextWithFormat:@""];
+    BOOL appleSilicon = [GSGPU isAppleSiliconMac];
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleInformational;
+    alert.messageText = Str(appleSilicon ? @"AppleSiliconUnsupported" : @"UnsupportedMachine");
+    alert.informativeText = Str(appleSilicon ? @"AppleSiliconUnsupportedMessage" : @"UnsupportedMachineMessage");
+    [alert addButtonWithTitle:Str(@"OhISee")];
     [alert runModal];
 }
 
@@ -105,26 +126,25 @@
     for (NSString *taskName in taskList)
         [descriptionText appendFormat:@"%@\n", taskName];
 
-    NSAlert *alert = [NSAlert alertWithMessageText:Str(messageKey)
-                                     defaultButton:@"OK"
-                                   alternateButton:@"Why?"
-                                       otherButton:nil
-                         informativeTextWithFormat:@"%@", descriptionText];
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = Str(messageKey);
+    alert.informativeText = descriptionText;
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Why?"];
 
-    if ([alert runModal] == NSAlertAlternateReturn)
-        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:kIntegratedOnlyMessageExplanationURL]];
+    if ([alert runModal] == NSAlertSecondButtonReturn)
+        GSOpenURL([NSURL URLWithString:kIntegratedOnlyMessageExplanationURL]);
 }
 
-#pragma mark - NSUserNotificationCenterDelegate protocol
+#pragma mark - UNUserNotificationCenterDelegate
 
-- (void)userNotificationCenter:(NSUserNotificationCenter *)center didDeliverNotification:(NSUserNotification *)notification
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+       willPresentNotification:(UNNotification *)notification
+         withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler
 {
-    [center removeDeliveredNotification:notification];
-}
-
-- (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center shouldPresentNotification:(NSUserNotification *)notification
-{
-    return YES;
+    // gfxCardStatus is a menu bar agent, so it is effectively always "foreground".
+    // Show the banner anyway, matching the old shouldPresentNotification: behavior.
+    completionHandler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList);
 }
 
 #pragma mark - Private helpers

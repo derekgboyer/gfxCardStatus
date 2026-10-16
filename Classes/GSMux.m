@@ -13,6 +13,9 @@
 #import "GSMux.h"
 #import "GSGPU.h"
 
+#import <IOKit/IOKitLib.h>
+#import <mach/mach.h>
+
 #define kDriverClassName "AppleGraphicsControl"
 
 #define kUseMockImpl (0)
@@ -269,7 +272,7 @@ static void dumpState(io_connect_t connect)
     
     // Look up the objects we wish to open.
     // This creates an io_iterator_t of all instances of our driver that exist in the I/O Registry.
-    kernResult = IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching(kDriverClassName), &iterator);    
+    kernResult = IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(kDriverClassName), &iterator);
     if (kernResult != KERN_SUCCESS) {
         GSLogDebug(@"IOServiceGetMatchingServices returned 0x%08x.", kernResult);
         return NO;
@@ -286,19 +289,31 @@ static void dumpState(io_connect_t connect)
     // that is used for all subsequent calls to the user client.
     // Applications pass the bad-Bit (indicates they need the dedicated gpu here)
     // as uint32_t type, 0 = no dedicated gpu, 1 = dedicated
-    kernResult = IOServiceOpen(service, mach_task_self(), 0, &_switcherConnect);
+    // mach_task_self() is a deprecated function in current SDKs. The task
+    // port symbol is the supported way to pass our task to IOServiceOpen.
+    kernResult = IOServiceOpen(service, mach_task_self_, 0, &_switcherConnect);
+    IOObjectRelease(service);
     if (kernResult != KERN_SUCCESS) {
         GSLogDebug(@"IOServiceOpen returned 0x%08x.", kernResult);
+        _switcherConnect = IO_OBJECT_NULL;
         return NO;
     }
     
     kernResult = IOConnectCallScalarMethod(_switcherConnect, kOpen, NULL, 0, NULL, NULL);
-    if (kernResult != KERN_SUCCESS)
+    if (kernResult != KERN_SUCCESS) {
         GSLogDebug(@"IOConnectCallScalarMethod returned 0x%08x.", kernResult);
-    else
-        GSLogDebug(@"Driver connection opened.");
-    
-    return kernResult == KERN_SUCCESS;
+        IOServiceClose(_switcherConnect);
+        _switcherConnect = IO_OBJECT_NULL;
+        return NO;
+    }
+
+    GSLogDebug(@"Driver connection opened.");
+    return YES;
+}
+
+- (BOOL)isOpen
+{
+    return _switcherConnect != IO_OBJECT_NULL;
 }
 
 - (void)switcherClose
@@ -409,6 +424,11 @@ static void dumpState(io_connect_t connect)
 @implementation _GSMuxMockImpl
 
 - (BOOL)switcherOpen
+{
+    return YES;
+}
+
+- (BOOL)isOpen
 {
     return YES;
 }

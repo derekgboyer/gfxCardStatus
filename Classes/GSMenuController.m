@@ -14,17 +14,21 @@
 #import "GSNotifier.h"
 #import "GSProcess.h"
 
-#import <ReactiveCocoa/ReactiveCocoa.h>
-
 #define kShouldUseSmartMenuBarIconsKeyPath @"prefsDict.shouldUseSmartMenuBarIcons"
+
+static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
+static void *GSAppearanceContext = &GSAppearanceContext;
 
 @interface GSMenuController (Internal)
 - (void)_localizeMenu;
+- (void)_updateMenuForUnavailableSwitching;
 - (void)_updateProcessList;
 - (void)_updateMenuBarIconText:(BOOL)isUsingIntegrated cardString:(NSString *)cardString;
 @end
 
-@implementation GSMenuController
+@implementation GSMenuController {
+    BOOL _observingAppearance;
+}
 
 @synthesize statusMenu;
 
@@ -39,6 +43,7 @@
 @synthesize integratedOnly;
 @synthesize discreteOnly;
 @synthesize dynamicSwitching;
+@synthesize switchingUnavailableItem;
 @synthesize processesSeparator;
 @synthesize dependentProcesses;
 @synthesize processList;
@@ -53,14 +58,31 @@
         return nil;
     
     _prefs = [GSPreferences sharedInstance];
-
-    // FIXME: Rip out ReactiveCocoa.
-    [[_prefs rac_signalForKeyPath:kShouldUseSmartMenuBarIconsKeyPath observer:self] subscribeNext:^(id x) {
-        GSLogDebug(@"Use smart menu bar icons value changed: %@", x);
-        [self updateMenu];
-    }];
+    [_prefs addObserver:self
+             forKeyPath:kShouldUseSmartMenuBarIconsKeyPath
+                options:NSKeyValueObservingOptionNew
+                context:GSSmartMenuBarIconsContext];
     
     return self;
+}
+
+- (void)dealloc
+{
+    [_prefs removeObserver:self forKeyPath:kShouldUseSmartMenuBarIconsKeyPath context:GSSmartMenuBarIconsContext];
+    if (_observingAppearance)
+        [NSApp removeObserver:self forKeyPath:@"effectiveAppearance" context:GSAppearanceContext];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+{
+    if (context == GSSmartMenuBarIconsContext || context == GSAppearanceContext) {
+        if (context == GSSmartMenuBarIconsContext)
+            GSLogDebug(@"Use smart menu bar icons value changed: %@", change[NSKeyValueChangeNewKey]);
+        [self updateMenu];
+        return;
+    }
+
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 }
 
 #pragma mark - GSMenuController API
@@ -70,8 +92,14 @@
     [statusMenu setDelegate:self];
     
     _statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
-    [_statusItem setMenu:statusMenu];
-    [_statusItem setHighlightMode:YES];
+    _statusItem.menu = statusMenu;
+    if (!_observingAppearance) {
+        [NSApp addObserver:self
+               forKeyPath:@"effectiveAppearance"
+                  options:0
+                  context:GSAppearanceContext];
+        _observingAppearance = YES;
+    }
     
     BOOL isLegacyMachine = [GSGPU isLegacyMachine];
     [switchGPUs setHidden:!isLegacyMachine];
@@ -85,7 +113,15 @@
 
 - (void)updateMenu
 {
+    if (![[GSMux defaultMux] isOpen]) {
+        [self _updateMenuForUnavailableSwitching];
+        return;
+    }
+
     GSLogDebug(@"Updating status...");
+
+    _statusItem.button.appearsDisabled = NO;
+    [switchingUnavailableItem setHidden:YES];
 
     BOOL isUsingIntegrated = [GSMux defaultMux].isUsingIntegratedGPU;
 
@@ -98,9 +134,9 @@
         GSLogInfo(@"Using dynamic switching?: %d", dynamic);
         GSLogInfo(@"Using old-style switching policy?: %d", [GSMux defaultMux].isUsingOldStyleSwitchPolicy);
 
-        [integratedOnly setState:(isUsingIntegrated && !dynamic) ? NSOnState : NSOffState];
-        [discreteOnly setState:(!isUsingIntegrated && !dynamic) ? NSOnState : NSOffState];
-        [dynamicSwitching setState:dynamic ? NSOnState : NSOffState];
+        [integratedOnly setState:(isUsingIntegrated && !dynamic) ? NSControlStateValueOn : NSControlStateValueOff];
+        [discreteOnly setState:(!isUsingIntegrated && !dynamic) ? NSControlStateValueOn : NSControlStateValueOff];
+        [dynamicSwitching setState:dynamic ? NSControlStateValueOn : NSControlStateValueOff];
     }
 
     [currentCard setTitle:[Str(@"Card") stringByReplacingOccurrencesOfString:@"%%" withString:gpuString]];
@@ -143,7 +179,7 @@
 
 - (IBAction)openApplicationURL:(id)sender
 {
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:kApplicationWebsiteURL]];
+    GSOpenURL([NSURL URLWithString:kApplicationWebsiteURL]);
 }
 
 - (IBAction)quit:(id)sender
@@ -161,7 +197,7 @@
     }
 
     // Don't go any further if the user clicked on an already-selected item.
-    if ([sender state] == NSOnState) return;
+    if ([sender state] == NSControlStateValueOn) return;
 
     BOOL retval = NO;
 
@@ -196,9 +232,9 @@
 
     // Only change status in case of GPU switch success.
     if (retval) {
-        [integratedOnly setState:(sender == integratedOnly ? NSOnState : NSOffState)];
-        [discreteOnly setState:(sender == discreteOnly ? NSOnState : NSOffState)];
-        [dynamicSwitching setState:(sender == dynamicSwitching ? NSOnState : NSOffState)];
+        [integratedOnly setState:(sender == integratedOnly ? NSControlStateValueOn : NSControlStateValueOff)];
+        [discreteOnly setState:(sender == discreteOnly ? NSControlStateValueOn : NSControlStateValueOff)];
+        [dynamicSwitching setState:(sender == dynamicSwitching ? NSControlStateValueOn : NSControlStateValueOff)];
     }
 }
 
@@ -206,6 +242,9 @@
 
 - (void)menuNeedsUpdate:(NSMenu *)menu
 {
+    if (![[GSMux defaultMux] isOpen])
+        return;
+
     [self _updateProcessList];
 }
 
@@ -230,10 +269,29 @@
     [visitWebsiteItem setTitle:[Str(visitWebsiteItem.title) stringByReplacingOccurrencesOfString:@"%%" withString:kApplicationWebsiteURL]];
     NSArray *localized = [NSArray arrayWithObjects:updateItem, preferencesItem,
                           quitItem, switchGPUs, integratedOnly, discreteOnly, 
-                          dynamicSwitching, dependentProcesses, processList, 
+                          dynamicSwitching, switchingUnavailableItem, dependentProcesses, processList, 
                           nil];
     for (NSButton *loc in localized)
         [loc setTitle:Str([loc title])];
+}
+
+- (void)_updateMenuForUnavailableSwitching
+{
+    [switchGPUs setHidden:YES];
+    [integratedOnly setHidden:YES];
+    [discreteOnly setHidden:YES];
+    [dynamicSwitching setHidden:YES];
+    [switchingUnavailableItem setHidden:NO];
+    [processList setHidden:YES];
+    [processesSeparator setHidden:YES];
+    [dependentProcesses setHidden:YES];
+    [currentCard setTitle:Str(@"GPUSwitchingUnavailable")];
+
+    if (_statusItem != nil)
+        _statusItem.button.appearsDisabled = YES;
+
+    // A dash stands in for the usual i/d (or vendor) glyph.
+    [self _updateMenuBarIconText:NO cardString:@"–"];
 }
 
 - (void)_updateProcessList
@@ -277,49 +335,41 @@
     }
 }
 
-- (void)_updateMenuBarIconText:(BOOL)isUsingIntegrated cardString:(NSString *)cardString
+- (void)_updateMenuBarIconText:(BOOL)__unused isUsingIntegrated cardString:(NSString *)cardString
 {
     // Grab the first character of GPU string for the menu bar icon.
     unichar firstLetter;
-    
-    if ([GSGPU isLegacyMachine] || ![_prefs shouldUseSmartMenuBarIcons]) {
+
+    if (![[GSMux defaultMux] isOpen]) {
+        firstLetter = [@"–" characterAtIndex:0];
+    } else if ([GSGPU isLegacyMachine] || ![_prefs shouldUseSmartMenuBarIcons]) {
         firstLetter = [GSMux defaultMux].isUsingIntegratedGPU ? 'i' : 'd';
+    } else if (cardString.length == 0) {
+        firstLetter = '?';
     } else {
         firstLetter = [cardString characterAtIndex:0];
     }
 
     NSString *letter = [[NSString stringWithFormat:@"%C", firstLetter] lowercaseString];
-    int fontSize = ([letter isEqualToString:@"n"] || [letter isEqualToString:@"a"] ? 19 : 18);
+    CGFloat fontSize = ([letter isEqualToString:@"n"] || [letter isEqualToString:@"a"] ? 19.0 : 18.0);
 
-    // Set our font style.
+    // Set our font style. labelColor follows the menu bar appearance, so the
+    // glyph stays readable in Dark Mode.
     NSFontManager *fontManager = [NSFontManager sharedFontManager];
     NSFont *boldItalic = [fontManager fontWithFamily:@"Georgia"
                                               traits:NSBoldFontMask|NSItalicFontMask
                                               weight:0
                                                 size:fontSize];
 
-    // Quick fix for menubar icon offset in macOS Big Sur
-    double baselineOffset = 2.0;
-    NSProcessInfo* processInfo = [NSProcessInfo processInfo];
-    
-    // [NSProcessInfo operatingSystemVersion] is only available since macOS 10.10
-    if ([processInfo respondsToSelector:@selector(operatingSystemVersion)]) {
-        NSOperatingSystemVersion systemVersion = [processInfo operatingSystemVersion];
-        // 10.16 is for backward compatibility targeting 10.x SDK
-        if (systemVersion.majorVersion >= 11 || (systemVersion.majorVersion >= 10 && systemVersion.minorVersion >= 16)) {
-            baselineOffset = -1.0;
-        }
-    }
-    
-    NSDictionary *attributes = [[NSDictionary alloc] initWithObjectsAndKeys:
-                                boldItalic, NSFontAttributeName,
-                                [NSNumber numberWithDouble:baselineOffset], NSBaselineOffsetAttributeName, nil];
-    NSAttributedString *title = [[NSAttributedString alloc] 
-                                 initWithString:letter
-                                 attributes:attributes];
-    
-    // Finally set the menu bar item's text.
-    [_statusItem setAttributedTitle:title];
+    // Menu bar metrics from macOS 11 onward. The deployment target is newer.
+    NSDictionary *attributes = @{
+        NSFontAttributeName: boldItalic,
+        NSForegroundColorAttributeName: [NSColor labelColor],
+        NSBaselineOffsetAttributeName: @(-1.0)
+    };
+    NSAttributedString *title = [[NSAttributedString alloc] initWithString:letter attributes:attributes];
+
+    _statusItem.button.attributedTitle = title;
 }
 
 @end

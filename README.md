@@ -2,15 +2,51 @@
 
 by Cody Krieger
 
-gfxCardStatus is an open-source menu bar application for OS X that allows users
-of dual GPU MacBook Pros to monitor the status of, and switch between said GPUs.
+gfxCardStatus is a menu bar app for dual-GPU Intel MacBook Pros. It shows which
+GPU is active and can switch between integrated only, discrete only, and
+dynamic switching.
 
-![gfxCardStatus v2.5 downloads](https://img.shields.io/github/downloads/codykrieger/gfxCardStatus/v2.5/total?style=flat-square)
+On Apple silicon, and on any other Mac without switchable GPUs, the app still
+launches. Switching controls are disabled and the status item explains that
+GPU switching does not apply.
 
-## Building from source
+## Requirements
 
-Building is easy. Open up `gfxCardStatus.xcworkspace` (**not**
-`gfxCardStatus.xcodeproj`), hit ⌘B, and away you go.
+- macOS 13.0 (Ventura) or later
+- Xcode 16 or later. A current Xcode is the intended toolchain.
+- Network access the first time you open the project, so Xcode can fetch Sparkle
+
+The app is a universal binary (`arm64` and `x86_64`). Debug builds the active
+architecture only. Release builds both.
+
+## Build and run
+
+1. Clone this repository.
+2. Open `gfxCardStatus.xcworkspace` (or `gfxCardStatus.xcodeproj`). CocoaPods is
+   no longer used. The workspace only contains the app project.
+3. Wait for the Sparkle Swift package to resolve.
+4. Select the **gfxCardStatus** scheme.
+5. Build with ⌘B and run with ⌘R.
+
+Debug builds are ad-hoc signed (`CODE_SIGN_IDENTITY = -`) with Hardened Runtime.
+Release builds use automatic signing and the development team already set on
+the target. The app is not sandboxed: GPU switching talks to the
+`AppleGraphicsControl` IOKit user client, and the dependency list reads other
+processes with `sysctl`.
+
+GPU switching only works on a dual-GPU Intel MacBook Pro. On any other Mac the
+menu bar item stays up and the switching commands are hidden.
+
+"Load gfxCardStatus at startup" registers the app with `SMAppService`. macOS
+may ask you to approve it in **System Settings → General → Login Items &
+Extensions**.
+
+## Release archive
+
+`script/dist` archives the app, notarizes it with `notarytool`, staples the
+ticket, and prints a Sparkle 2 appcast item. Run it on a Mac that has the
+notarization keychain item and the EdDSA signing key the script expects.
+Sparkle 2 no longer uses the DSA signature.
 
 ## License
 

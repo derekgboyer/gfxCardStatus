@@ -14,7 +14,7 @@
 
 - (void)showGPUChangeNotification:(GSGPUType)type;
 - (void)showOneTimeNotification;
-- (void)showUnsupportedMachineMessage;
+- (void)showGPUSwitchingUnavailableMessage;
 - (void)showCantSwitchToIntegratedOnlyMessage:(NSArray *)taskList;
 
 @end

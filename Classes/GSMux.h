@@ -18,6 +18,9 @@ typedef enum {
 // Switching driver initialization and cleanup routines.
 - (BOOL)switcherOpen;
 - (void)switcherClose;
+// YES after switcherOpen succeeds. Apple silicon and other machines without
+// AppleGraphicsControl stay closed, and callers must not try to switch.
+- (BOOL)isOpen;
 
 - (BOOL)setMode:(GSSwitcherMode)mode;
 

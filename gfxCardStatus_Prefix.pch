@@ -17,4 +17,12 @@
     #define Str(key) NSLocalizedString(key, key)
 
     #define kApplicationWebsiteURL @"https://gfx.io"
+
+    static inline void GSOpenURL(NSURL *url) {
+        if (url == nil)
+            return;
+        [[NSWorkspace sharedWorkspace] openURL:url
+                                 configuration:[NSWorkspaceOpenConfiguration configuration]
+                             completionHandler:nil];
+    }
 #endif

@@ -11,17 +11,20 @@
 #import "GSPreferences.h"
 #import "GSStartup.h"
 #import "GSGPU.h"
-#import <ReactiveCocoa/ReactiveCocoa.h>
 
 #define kGeneralPreferencesName         @"General"
 
 #define kShouldStartAtLoginKeyPath      @"prefsDict.shouldStartAtLogin"
 
+static void *GSShouldStartAtLoginContext = &GSShouldStartAtLoginContext;
+
 @interface GeneralPreferencesViewController (Internal)
 - (BOOL)isLegacyMachine;
 @end
 
-@implementation GeneralPreferencesViewController
+@implementation GeneralPreferencesViewController {
+    BOOL _observingStartupPreference;
+}
 
 @synthesize prefChkSmartIcons;
 @synthesize prefChkUpdate;
@@ -47,19 +50,38 @@
 {
     [super loadView];
 
-    // FIXME: Rip out ReactiveCocoa.
-
-    // Add or remove the app from the current user's Login Items upon hearing
-    // from our awesome friend Josh Abernathy at GitHub that the value we're
-    // subscribed to has changed.
-    [[prefs rac_signalForKeyPath:kShouldStartAtLoginKeyPath observer:self] subscribeNext:^(id x) {
-        GSLogDebug(@"Start at login value changed: %@", x);
-        [GSStartup loadAtStartup:[x boolValue]];
-    }];
+    // Add or remove the app from the current user's Login Items when the
+    // bound preference changes.
+    if (!_observingStartupPreference) {
+        [prefs addObserver:self
+                forKeyPath:kShouldStartAtLoginKeyPath
+                   options:NSKeyValueObservingOptionNew
+                   context:GSShouldStartAtLoginContext];
+        _observingStartupPreference = YES;
+    }
     
     NSArray *localizedButtons = [[NSArray alloc] initWithObjects:prefChkStartup, prefChkUpdate, prefChkSmartIcons, prefChkGrowl, nil];
     for (NSButton *loc in localizedButtons)
         [loc setTitle:Str([loc title])];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+{
+    if (context == GSShouldStartAtLoginContext) {
+        id value = change[NSKeyValueChangeNewKey];
+        BOOL enabled = [value isKindOfClass:[NSNumber class]] && [value boolValue];
+        GSLogDebug(@"Start at login value changed: %@", value);
+        [GSStartup loadAtStartup:enabled];
+        return;
+    }
+
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+
+- (void)dealloc
+{
+    if (_observingStartupPreference)
+        [prefs removeObserver:self forKeyPath:kShouldStartAtLoginKeyPath context:GSShouldStartAtLoginContext];
 }
 
 #pragma mark - Passthrough properties

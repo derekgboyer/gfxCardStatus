@@ -14,12 +14,14 @@
 #import "GSMux.h"
 #import "GSNotifier.h"
 
-#import <ReactiveCocoa/ReactiveCocoa.h>
-
 #define kHasSeenOneTimeNotificationKey @"hasSeenVersionTwoMessage"
 #define kShouldCheckForUpdatesOnStartupKeyPath @"prefsDict.shouldCheckForUpdatesOnStartup"
 
-@implementation gfxCardStatusAppDelegate
+static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
+
+@implementation gfxCardStatusAppDelegate {
+    BOOL _observingUpdateCheck;
+}
 
 #pragma mark - Initialization
 
@@ -29,12 +31,12 @@
     // a first-time run.
     _prefs = [GSPreferences sharedInstance];
 
-    // Attempt to open a connection to AppleGraphicsControl.
-    if (![[GSMux defaultMux] switcherOpen]) {
-        GSLogError(@"Can't open connection to AppleGraphicsControl. This probably isn't a gfxCardStatus-compatible machine.");
-        
-        [[GSNotifier sharedInstance] showUnsupportedMachineMessage];
-        [_menuController quit:self];
+    // Attempt to open a connection to AppleGraphicsControl. Apple silicon and
+    // other Macs without a mux don't have this driver; keep running so the
+    // menu bar item can explain that switching doesn't apply.
+    BOOL switchingAvailable = [[GSMux defaultMux] switcherOpen];
+    if (!switchingAvailable) {
+        GSLogError(@"Can't open connection to AppleGraphicsControl. GPU switching isn't available on this Mac.");
     } else {
         GSLogInfo(@"GPUs present: %@", [GSGPU getGPUNames]);
         GSLogInfo(@"Integrated GPU name: %@", [GSGPU integratedGPUName]);
@@ -52,10 +54,10 @@
             // weird state from the get go.
             [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
         }
-    }
 
-    // Now accepting GPU change notifications! Apply at your nearest GSGPU today.
-    [GSGPU registerForGPUChangeNotifications:self];
+        // Now accepting GPU change notifications! Apply at your nearest GSGPU today.
+        [GSGPU registerForGPUChangeNotifications:self];
+    }
 
     // Register with NSWorkspace for system shutdown notifications to ensure
     // proper termination in the event of system shutdown and/or user logout.
@@ -68,6 +70,11 @@
 
     // Initialize the menu bar icon and hook the menu up to it.
     [_menuController setupMenu];
+
+    if (!switchingAvailable && ![_prefs boolForKey:@"hasSeenGPUSwitchingUnavailableMessage"]) {
+        [[GSNotifier sharedInstance] showGPUSwitchingUnavailableMessage];
+        [_prefs setBool:YES forKey:@"hasSeenGPUSwitchingUnavailableMessage"];
+    }
 
     // Show the one-time startup notification asking users to be kind and donate
     // if they like gfxCardStatus. Then make it go away forever.
@@ -86,21 +93,39 @@
     if ([feedURL containsString:@"appcast.beta.xml"])
         [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"SUFeedURL"];
 
-    GSLogInfo(@"Appcast URL: %@", _updater.feedURL);
+    GSLogInfo(@"Appcast URL: %@", _updaterController.updater.feedURL);
 
     // Hook up the check for updates on startup preference directly to the
-    // automaticallyChecksForUpdates property on the SUUpdater.
-    _updater.automaticallyChecksForUpdates = _prefs.shouldCheckForUpdatesOnStartup;
-
-    // FIXME: Rip out ReactiveCocoa.
-    [[_prefs rac_signalForKeyPath:kShouldCheckForUpdatesOnStartupKeyPath observer:self] subscribeNext:^(id x) {
-        GSLogDebug(@"Check for updates on startup value changed: %@", x);
-        self->_updater.automaticallyChecksForUpdates = [x boolValue];
-    }];
+    // automaticallyChecksForUpdates property on the updater.
+    _updaterController.updater.automaticallyChecksForUpdates = _prefs.shouldCheckForUpdatesOnStartup;
+    [_prefs addObserver:self
+             forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath
+                options:NSKeyValueObservingOptionNew
+                context:GSShouldCheckForUpdatesContext];
+    _observingUpdateCheck = YES;
 
     // Check for updates if the user has them enabled.
     if ([_prefs shouldCheckForUpdatesOnStartup])
-        [_updater checkForUpdatesInBackground];
+        [_updaterController.updater checkForUpdatesInBackground];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+{
+    if (context == GSShouldCheckForUpdatesContext) {
+        id value = change[NSKeyValueChangeNewKey];
+        BOOL enabled = [value isKindOfClass:[NSNumber class]] && [value boolValue];
+        GSLogDebug(@"Check for updates on startup value changed: %@", value);
+        _updaterController.updater.automaticallyChecksForUpdates = enabled;
+        return;
+    }
+
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+
+- (void)dealloc
+{
+    if (_observingUpdateCheck)
+        [_prefs removeObserver:self forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath context:GSShouldCheckForUpdatesContext];
 }
 
 #pragma mark - Termination Notifications
@@ -109,7 +134,7 @@
 {
     // Set the machine to dynamic switching before shutdown to avoid machine restarting
     // stuck in a forced GPU mode.
-    if (![GSGPU isLegacyMachine])
+    if ([[GSMux defaultMux] isOpen] && ![GSGPU isLegacyMachine])
         [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
 
     GSLogDebug(@"Termination notification received. Going to Dynamic Switching.");

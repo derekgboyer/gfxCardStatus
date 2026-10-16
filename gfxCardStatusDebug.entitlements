@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Ad-hoc Debug builds still load the embedded Sparkle framework. Library
+	     validation would reject that copy when the app is signed with the
+	     local "-" identity. Release builds do not disable library validation. -->
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 </dict>
