@@ -52,5 +52,8 @@
 - (IBAction)setMode:(id)sender;
 - (IBAction)togglePowerSourceSwitching:(id)sender;
 - (IBAction)setPowerSourceMode:(id)sender;
+- (IBAction)pauseAutomaticRules:(id)sender;
+- (IBAction)resumeAutomaticRules:(id)sender;
+- (IBAction)selectProfile:(id)sender;
 
 @end
