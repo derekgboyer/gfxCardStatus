@@ -202,10 +202,22 @@ and prints that file.
 
 ## Release archive
 
-`script/dist` archives the app, notarizes it with `notarytool`, staples the
-ticket, and prints a Sparkle 2 appcast item. Run it on a Mac that has the
-notarization keychain item and the EdDSA signing key the script expects.
-Sparkle 2 no longer uses the DSA signature.
+Pushing a `v*` tag (for example `v2.5`) runs `.github/workflows/release.yml`.
+That job builds the universal Release app, signs and notarizes it when the
+Actions secrets are set, and uploads a zip, a DMG, source archives, and a
+Sparkle appcast to the GitHub release. Pull requests and branch pushes run
+`.github/workflows/build.yml`. The secrets, the EdDSA key, and the tag steps
+are in `RELEASING.md`.
+
+`script/dist` is the local path. It archives the app, notarizes it with
+`notarytool`, staples the ticket, and prints a Sparkle 2 appcast item. Run it
+on a Mac that has the notarization keychain item and the EdDSA signing key the
+script expects. Sparkle 2 no longer uses the DSA signature.
+
+Xcode and `script/dist` still use `https://gfx.io/appcasts/release.xml`
+(`testing.xml` when `SU_FEED_CHANNEL` is `testing` or `beta`). The tag
+workflow passes its own feed URL, so the app it publishes checks that
+repository's GitHub release appcast.
 
 ## License
 
