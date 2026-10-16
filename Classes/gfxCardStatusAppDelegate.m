@@ -13,6 +13,7 @@
 #import "GSProcess.h"
 #import "GSMux.h"
 #import "GSNotifier.h"
+#import "GSPowerSourceController.h"
 
 #define kHasSeenOneTimeNotificationKey @"hasSeenVersionTwoMessage"
 #define kShouldCheckForUpdatesOnStartupKeyPath @"prefsDict.shouldCheckForUpdatesOnStartup"
@@ -35,6 +36,7 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
     // other Macs without a mux don't have this driver; keep running so the
     // menu bar item can explain that switching doesn't apply.
     BOOL switchingAvailable = [[GSMux defaultMux] switcherOpen];
+    BOOL commandLineOverride = NO;
     if (!switchingAvailable) {
         GSLogError(@"Can't open connection to AppleGraphicsControl. GPU switching isn't available on this Mac.");
     } else {
@@ -45,13 +47,17 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
         NSArray *args = [[NSProcessInfo processInfo] arguments];
         if ([args indexOfObject:@"--discrete"] != NSNotFound) {
             [[GSMux defaultMux] setMode:GSSwitcherModeForceDiscrete];
+            commandLineOverride = YES;
         } else if ([args indexOfObject:@"--integrated"] != NSNotFound) {
             [[GSMux defaultMux] setMode:GSSwitcherModeForceIntegrated];
+            commandLineOverride = YES;
         } else if ([args indexOfObject:@"--dynamic"] != NSNotFound) {
             [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
-        } else if (![GSGPU isLegacyMachine]) {
+            commandLineOverride = YES;
+        } else if (![GSGPU isLegacyMachine] && ![_prefs shouldUsePowerSourceBasedSwitching]) {
             // Set the machine to dynamic switching to get it out of any kind of
-            // weird state from the get go.
+            // weird state from the get go. Skipped when power-source rules are
+            // on: those rules, including Don't Change, decide the launch mode.
             [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
         }
 
@@ -70,6 +76,11 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
     // Initialize the menu bar icon and hook the menu up to it.
     [_menuController setupMenu];
+
+    // Menu is listening for power-source updates before monitoring starts,
+    // so the first reading refreshes the status menu.
+    if (switchingAvailable)
+        [[GSPowerSourceController sharedController] startMonitoringWithManualOverride:commandLineOverride];
 
     if (!switchingAvailable && ![_prefs boolForKey:@"hasSeenGPUSwitchingUnavailableMessage"]) {
         [[GSNotifier sharedInstance] showGPUSwitchingUnavailableMessage];
@@ -153,8 +164,16 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
 - (void)GPUDidChangeTo:(GSGPUType)gpu
 {
-    [_menuController updateMenu];
-    [[GSNotifier sharedInstance] showGPUChangeNotification:gpu];
+    // The display-reconfiguration callback invokes this off the main queue.
+    // Power-source rules also refresh the menu on the main queue, so the GPU
+    // update has to land there too.
+    // The main queue owns the block until it runs, and the delegate does not
+    // own that block, so naming self here does not create a cycle. Keeping
+    // self alive until the update runs matches the previous implicit retain.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.menuController updateMenu];
+        [[GSNotifier sharedInstance] showGPUChangeNotification:gpu];
+    });
 }
 
 @end

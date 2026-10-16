@@ -13,6 +13,7 @@
 #import "GSMux.h"
 #import "GSNotifier.h"
 #import "GSProcess.h"
+#import "GSPowerSourceController.h"
 
 #define kShouldUseSmartMenuBarIconsKeyPath @"prefsDict.shouldUseSmartMenuBarIcons"
 
@@ -24,10 +25,23 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 - (void)_updateMenuForUnavailableSwitching;
 - (void)_updateProcessList;
 - (void)_updateMenuBarIconText:(BOOL)isUsingIntegrated cardString:(NSString *)cardString;
+- (void)_installPowerSourceMenuItems;
+- (void)_updatePowerControls;
+- (void)_markModeMenu:(NSMenu *)menu selected:(GSPowerSourceBasedSwitchingMode)mode;
+- (NSMenu *)_powerModeMenu;
+- (NSString *)_menuTitleForPreferenceKey:(NSString *)key;
+- (void)_powerSourceStateDidChange:(NSNotification *)notification;
 @end
 
 @implementation GSMenuController {
     BOOL _observingAppearance;
+    BOOL _observingPowerSource;
+    NSMenuItem *_powerSourceSeparator;
+    NSMenuItem *_powerSourceSwitchingItem;
+    NSMenuItem *_onBatteryItem;
+    NSMenuItem *_pluggedInItem;
+    NSMenu *_onBatteryMenu;
+    NSMenu *_pluggedInMenu;
 }
 
 @synthesize statusMenu;
@@ -71,6 +85,11 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     [_prefs removeObserver:self forKeyPath:kShouldUseSmartMenuBarIconsKeyPath context:GSSmartMenuBarIconsContext];
     if (_observingAppearance)
         [NSApp removeObserver:self forKeyPath:@"effectiveAppearance" context:GSAppearanceContext];
+    if (_observingPowerSource) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                        name:GSPowerSourceStateDidChangeNotification
+                                                      object:nil];
+    }
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
@@ -108,6 +127,22 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     [dynamicSwitching setHidden:isLegacyMachine];
 
     [self _localizeMenu];
+
+    // The power-source item is in the nib and starts hidden. Show it whenever
+    // the mux is open, including legacy machines. The rules themselves are
+    // only offered where Integrated / Discrete / Dynamic all exist.
+    [currentPowerSource setHidden:![[GSMux defaultMux] isOpen]];
+    if ([[GSPowerSourceController sharedController] isFeatureAvailable])
+        [self _installPowerSourceMenuItems];
+
+    if (!_observingPowerSource) {
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(_powerSourceStateDidChange:)
+                                                     name:GSPowerSourceStateDidChangeNotification
+                                                   object:nil];
+        _observingPowerSource = YES;
+    }
+
     [self updateMenu];
 }
 
@@ -146,8 +181,12 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     else
         GSLogInfo(@"%@ in use. Bummer! Less battery life for you.", [GSGPU discreteGPUName]);
 
-    if (!isUsingIntegrated)
-        [self _updateProcessList];
+    // Always refresh. Switching to the integrated GPU (including from a
+    // power-source rule) has to hide the dependency list without waiting
+    // for the menu to open.
+    [self _updateProcessList];
+
+    [self _updatePowerControls];
 }
 
 #pragma mark - UI Actions
@@ -235,7 +274,33 @@ static void *GSAppearanceContext = &GSAppearanceContext;
         [integratedOnly setState:(sender == integratedOnly ? NSControlStateValueOn : NSControlStateValueOff)];
         [discreteOnly setState:(sender == discreteOnly ? NSControlStateValueOn : NSControlStateValueOff)];
         [dynamicSwitching setState:(sender == dynamicSwitching ? NSControlStateValueOn : NSControlStateValueOff)];
+
+        // Holds until the power source changes, or until the user turns the
+        // power-source feature on or edits the choice for the current source.
+        [[GSPowerSourceController sharedController] noteManualModeChange];
+        // Title and checkmarks, without inserting or removing items while the
+        // status menu is still tracking this click.
+        [self _updatePowerControls];
     }
+}
+
+- (IBAction)togglePowerSourceSwitching:(id)sender
+{
+    BOOL enabled = ![_prefs shouldUsePowerSourceBasedSwitching];
+    [_prefs setBool:enabled forKey:GSShouldUsePowerSourceBasedSwitchingKey];
+    [self _updatePowerControls];
+}
+
+- (IBAction)setPowerSourceMode:(id)sender
+{
+    if (![sender isKindOfClass:[NSMenuItem class]])
+        return;
+
+    NSMenuItem *item = sender;
+    GSPowerSource source = (item.menu == _onBatteryMenu) ? GSPowerSourceBattery : GSPowerSourceACAdapter;
+    [_prefs setPowerSourceBasedSwitchingMode:(GSPowerSourceBasedSwitchingMode)item.tag
+                               forPowerSource:source];
+    [self _updatePowerControls];
 }
 
 #pragma mark - NSMenuDelegate protocol
@@ -286,6 +351,11 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     [processesSeparator setHidden:YES];
     [dependentProcesses setHidden:YES];
     [currentCard setTitle:Str(@"GPUSwitchingUnavailable")];
+    [currentPowerSource setHidden:YES];
+    [_powerSourceSeparator setHidden:YES];
+    [_powerSourceSwitchingItem setHidden:YES];
+    [_onBatteryItem setHidden:YES];
+    [_pluggedInItem setHidden:YES];
 
     if (_statusItem != nil)
         _statusItem.button.appearsDisabled = YES;
@@ -370,6 +440,126 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     NSAttributedString *title = [[NSAttributedString alloc] initWithString:letter attributes:attributes];
 
     _statusItem.button.attributedTitle = title;
+}
+
+- (void)_installPowerSourceMenuItems
+{
+    if (_powerSourceSwitchingItem)
+        return;
+
+    _powerSourceSwitchingItem = [[NSMenuItem alloc] initWithTitle:Str(@"PrefPowerSwitching")
+                                                           action:@selector(togglePowerSourceSwitching:)
+                                                    keyEquivalent:@""];
+    _powerSourceSwitchingItem.target = self;
+
+    _onBatteryMenu = [self _powerModeMenu];
+    _pluggedInMenu = [self _powerModeMenu];
+
+    _onBatteryItem = [[NSMenuItem alloc] initWithTitle:[self _menuTitleForPreferenceKey:@"OnBattery"]
+                                                action:nil
+                                         keyEquivalent:@""];
+    _onBatteryItem.submenu = _onBatteryMenu;
+
+    _pluggedInItem = [[NSMenuItem alloc] initWithTitle:[self _menuTitleForPreferenceKey:@"PluggedIn"]
+                                                action:nil
+                                         keyEquivalent:@""];
+    _pluggedInItem.submenu = _pluggedInMenu;
+
+    NSInteger index = [statusMenu indexOfItem:dynamicSwitching];
+    if (index == NSNotFound)
+        index = [statusMenu numberOfItems];
+    else
+        index += 1;
+
+    _powerSourceSeparator = [NSMenuItem separatorItem];
+    [statusMenu insertItem:_powerSourceSeparator atIndex:index++];
+    [statusMenu insertItem:_powerSourceSwitchingItem atIndex:index++];
+    [statusMenu insertItem:_onBatteryItem atIndex:index++];
+    [statusMenu insertItem:_pluggedInItem atIndex:index++];
+}
+
+- (NSMenu *)_powerModeMenu
+{
+    NSMenu *menu = [[NSMenu alloc] init];
+    struct {
+        NSString *key;
+        GSPowerSourceBasedSwitchingMode mode;
+    } choices[] = {
+        { @"IntegratedOnly", GSPowerSourceBasedSwitchingModeIntegrated },
+        { @"DiscreteOnly", GSPowerSourceBasedSwitchingModeDiscrete },
+        { @"DynamicSwitching", GSPowerSourceBasedSwitchingModeDynamic },
+        { @"DontChange", GSPowerSourceBasedSwitchingModeDontChange }
+    };
+
+    for (NSUInteger i = 0; i < sizeof(choices) / sizeof(choices[0]); i++) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:Str(choices[i].key)
+                                                      action:@selector(setPowerSourceMode:)
+                                               keyEquivalent:@""];
+        item.target = self;
+        item.tag = choices[i].mode;
+        [menu addItem:item];
+    }
+    return menu;
+}
+
+- (NSString *)_menuTitleForPreferenceKey:(NSString *)key
+{
+    NSString *title = Str(key);
+    while (title.length > 0) {
+        unichar last = [title characterAtIndex:title.length - 1];
+        if (last != ':' && last != ' ' && last != 0xFF1A)
+            break;
+        title = [title substringToIndex:title.length - 1];
+    }
+    return title;
+}
+
+- (void)_updatePowerControls
+{
+    if (![[GSMux defaultMux] isOpen]) {
+        [currentPowerSource setHidden:YES];
+        return;
+    }
+
+    GSPowerSourceController *power = [GSPowerSourceController sharedController];
+    NSString *sourceName = Str(@"UnknownPowerSource");
+    if (power.currentSource == GSPowerSourceBattery)
+        sourceName = Str(@"Battery");
+    else if (power.currentSource == GSPowerSourceACAdapter)
+        sourceName = Str(@"ACAdapter");
+
+    NSString *title = [Str(@"PowerSource") stringByReplacingOccurrencesOfString:@"%%" withString:sourceName];
+    if (power.featureAvailable && power.manualOverrideActive && [_prefs shouldUsePowerSourceBasedSwitching])
+        title = [NSString stringWithFormat:@"%@ (%@)", title, Str(@"ManualOverride")];
+
+    [currentPowerSource setTitle:title];
+    [currentPowerSource setHidden:NO];
+    [_powerSourceSeparator setHidden:NO];
+    [_powerSourceSwitchingItem setHidden:NO];
+    [_onBatteryItem setHidden:NO];
+    [_pluggedInItem setHidden:NO];
+
+    _powerSourceSwitchingItem.state = [_prefs shouldUsePowerSourceBasedSwitching] ? NSControlStateValueOn : NSControlStateValueOff;
+    [self _markModeMenu:_onBatteryMenu selected:[_prefs modeForBattery]];
+    [self _markModeMenu:_pluggedInMenu selected:[_prefs modeForACAdapter]];
+}
+
+- (void)_markModeMenu:(NSMenu *)menu selected:(GSPowerSourceBasedSwitchingMode)mode
+{
+    for (NSMenuItem *item in menu.itemArray)
+        item.state = (item.tag == (NSInteger)mode) ? NSControlStateValueOn : NSControlStateValueOff;
+}
+
+- (void)_powerSourceStateDidChange:(NSNotification *)__unused notification
+{
+    // The notification can arrive in the middle of a status-menu click
+    // (a manual switch, or a power-source callback while the menu is
+    // tracking). Updating the menu synchronously can insert or remove items
+    // during tracking. Wait until the current event finishes.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([[GSMux defaultMux] isOpen])
+            [self updateMenu];
+    });
 }
 
 @end

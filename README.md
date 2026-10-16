@@ -37,6 +37,45 @@ processes with `sysctl`.
 GPU switching only works on a dual-GPU Intel MacBook Pro. On any other Mac the
 menu bar item stays up and the switching commands are hidden.
 
+## Power source-based switching
+
+The feature is off until you turn it on, so existing machines keep the old
+behavior: gfxCardStatus still forces Dynamic Switching at launch, and it does
+not change GPUs when you plug in or unplug.
+
+Turn it on from the status menu (**Use power source-based switching**) or from
+**Preferences → Advanced**. On Battery and Plugged In each have their own
+choice:
+
+- Integrated Only
+- Discrete Only
+- Dynamic Switching
+- Don't Change
+
+The choice is saved in the gfxCardStatus preferences plist
+(`~/Library/Preferences/com.codykrieger.gfxCardStatus-Preferences.plist`) and
+applied when the power source changes. gfxCardStatus watches for that with
+IOKit (`IOPSNotificationCreateRunLoopSource`).
+
+A mode you pick from the status menu, or a `--integrated`, `--discrete`, or
+`--dynamic` launch argument, holds until the next time the power source
+changes. Turning the feature on, or editing the choice for the power source
+you are on now, applies immediately. Don't Change leaves the GPU alone,
+including at launch. Quitting still returns a supported Mac to Dynamic
+Switching.
+
+Integrated Only is not applied while an external display or an app is keeping
+the discrete GPU awake. gfxCardStatus posts a notification and does not retry
+until the power source changes again, or until you edit the current rule.
+
+The status menu shows the current power source. While a manual choice is
+holding, that line is marked "manual".
+
+The controls are disabled on Macs that cannot switch GPUs, and on the old
+9400M/9600M machines that can only toggle between GPUs. An older preferences
+file that still has this feature turned on is reset to off once, so an
+upgrade does not start switching by itself.
+
 "Load gfxCardStatus at startup" registers the app with `SMAppService`. macOS
 may ask you to approve it in **System Settings → General → Login Items &
 Extensions**.

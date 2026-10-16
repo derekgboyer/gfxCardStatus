@@ -17,4 +17,8 @@
 - (void)showGPUSwitchingUnavailableMessage;
 - (void)showCantSwitchToIntegratedOnlyMessage:(NSArray *)taskList;
 
+// Non-modal. Used when a power-source rule cannot move to Integrated Only.
+// taskNames are display names, not the process dictionaries.
+- (void)showPowerRuleBlockedNotification:(NSArray *)taskNames;
+
 @end

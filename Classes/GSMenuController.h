@@ -50,5 +50,7 @@
 - (IBAction)quit:(id)sender;
 
 - (IBAction)setMode:(id)sender;
+- (IBAction)togglePowerSourceSwitching:(id)sender;
+- (IBAction)setPowerSourceMode:(id)sender;
 
 @end

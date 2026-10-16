@@ -7,12 +7,14 @@
 //
 
 #import <Cocoa/Cocoa.h>
+#import "GSPowerPolicy.h"
 
-typedef enum {
-    GSPowerSourceBasedSwitchingModeIntegrated = 0,
-    GSPowerSourceBasedSwitchingModeDiscrete = 1,
-    GSPowerSourceBasedSwitchingModeDynamic = 2
-} GSPowerSourceBasedSwitchingMode;
+// Keys in the gfxCardStatus preferences plist. The names stay compatible with
+// copies of the file written by older versions. The mode values are the
+// GSPowerSourceBasedSwitchingMode integers.
+extern NSString * const GSShouldUsePowerSourceBasedSwitchingKey;
+extern NSString * const GSPowerSourceBasedSwitchingACModeKey;
+extern NSString * const GSPowerSourceBasedSwitchingBatteryModeKey;
 
 @class GSPreferencesDictionary;
 
@@ -33,6 +35,11 @@ typedef enum {
 - (BOOL)shouldUseSmartMenuBarIcons;
 - (GSPowerSourceBasedSwitchingMode)modeForACAdapter;
 - (GSPowerSourceBasedSwitchingMode)modeForBattery;
+
+// Saves immediately. Used by the status menu. Out-of-range modes are ignored.
+// source must be battery or AC.
+- (void)setPowerSourceBasedSwitchingMode:(GSPowerSourceBasedSwitchingMode)mode
+                           forPowerSource:(GSPowerSource)source;
 
 - (void)setBool:(BOOL)value forKey:(NSString *)key;
 - (BOOL)boolForKey:(NSString *)key;
