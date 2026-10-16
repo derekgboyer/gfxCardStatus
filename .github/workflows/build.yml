@@ -67,6 +67,7 @@ jobs:
             echo "A source archive was accepted as a Sparkle update." >&2
             exit 1
           fi
+          python3 script/sparkle_public_ed_key.py --self-test
 
       - name: Build Release universal
         run: |
