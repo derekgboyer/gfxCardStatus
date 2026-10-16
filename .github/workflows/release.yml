@@ -154,7 +154,7 @@ jobs:
             echo "Signing ${APP}"
             codesign --force --sign "$IDENTITY" --options runtime --timestamp --entitlements "$ENTITLEMENTS" "$APP"
             set +e
-            ENT_DUMP=$(codesign -d --entitlements :- "$BINARY" 2>&1)
+            ENT_DUMP=$(codesign -d --entitlements - "$BINARY" 2>&1)
             ent_status=$?
             set -e
             printf '%s\n' "$ENT_DUMP"
@@ -172,7 +172,7 @@ jobs:
             fi
             DOWNLOADER="${FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc"
             set +e
-            DL_DUMP=$(codesign -d --entitlements :- "$DOWNLOADER" 2>&1)
+            DL_DUMP=$(codesign -d --entitlements - "$DOWNLOADER" 2>&1)
             dl_status=$?
             set -e
             printf '%s\n' "$DL_DUMP"

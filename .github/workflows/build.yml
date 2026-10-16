@@ -156,7 +156,7 @@ jobs:
           # Hardened runtime is the runtime codesign flag (0x10000).
           codesign -d --verbose=2 "${APP}" 2>&1 | grep -E -q 'flags=.*runtime'
           set +e
-          ENT_DUMP=$(codesign -d --entitlements :- "${BINARY}" 2>&1)
+          ENT_DUMP=$(codesign -d --entitlements - "${BINARY}" 2>&1)
           ent_status=$?
           set -e
           printf '%s\n' "$ENT_DUMP"
