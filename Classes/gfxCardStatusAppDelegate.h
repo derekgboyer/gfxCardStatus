@@ -12,13 +12,12 @@
 #import "GSGPU.h"
 
 #import <Sparkle/Sparkle.h>
-#import <Sparkle/SUUpdater.h>
 
 @interface gfxCardStatusAppDelegate : NSObject <NSApplicationDelegate,GSGPUDelegate> {
     GSPreferences *_prefs;
 }
 
-@property (strong) IBOutlet SUUpdater *updater;
+@property (strong) IBOutlet SPUStandardUpdaterController *updaterController;
 @property (strong) IBOutlet GSMenuController *menuController;
 
 @end

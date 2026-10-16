@@ -86,11 +86,11 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
     if ([feedURL containsString:@"appcast.beta.xml"])
         [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"SUFeedURL"];
 
-    GSLogInfo(@"Appcast URL: %@", _updater.feedURL);
+    GSLogInfo(@"Appcast URL: %@", _updaterController.updater.feedURL);
 
     // Hook up the check for updates on startup preference directly to the
     // automaticallyChecksForUpdates property on the updater.
-    _updater.automaticallyChecksForUpdates = _prefs.shouldCheckForUpdatesOnStartup;
+    _updaterController.updater.automaticallyChecksForUpdates = _prefs.shouldCheckForUpdatesOnStartup;
     [_prefs addObserver:self
              forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath
                 options:NSKeyValueObservingOptionNew
@@ -98,7 +98,7 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
     // Check for updates if the user has them enabled.
     if ([_prefs shouldCheckForUpdatesOnStartup])
-        [_updater checkForUpdatesInBackground];
+        [_updaterController.updater checkForUpdatesInBackground];
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
@@ -107,7 +107,7 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
         id value = change[NSKeyValueChangeNewKey];
         BOOL enabled = [value isKindOfClass:[NSNumber class]] && [value boolValue];
         GSLogDebug(@"Check for updates on startup value changed: %@", value);
-        _updater.automaticallyChecksForUpdates = enabled;
+        _updaterController.updater.automaticallyChecksForUpdates = enabled;
         return;
     }
 

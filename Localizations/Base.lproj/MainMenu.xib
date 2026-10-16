@@ -651,7 +651,7 @@
         <customObject id="494" userLabel="gfxCardStatus App Delegate" customClass="gfxCardStatusAppDelegate">
             <connections>
                 <outlet property="menuController" destination="850" id="875"/>
-                <outlet property="updater" destination="661" id="664"/>
+                <outlet property="updaterController" destination="661" id="664"/>
             </connections>
         </customObject>
         <customObject id="420" customClass="NSFontManager"/>
@@ -732,7 +732,7 @@
                 </menuItem>
             </items>
         </menu>
-        <customObject id="661" customClass="SUUpdater"/>
+        <customObject id="661" customClass="SPUStandardUpdaterController"/>
         <customObject id="850" customClass="GSMenuController">
             <connections>
                 <outlet property="currentCard" destination="653" id="851"/>
