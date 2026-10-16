@@ -415,6 +415,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		0B7A943E256441C70086537C /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -430,7 +431,7 @@
 			enableUserScriptSandboxing = 0;
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "# based on http://tgoode.com/2014/06/05/sensible-way-increment-bundle-version-cfbundleversion-xcode\nif git rev-parse --is-inside-work-tree 2> /dev/null > /dev/null; then\n    commit_count=\"$(git rev-list --count HEAD)\"\n    bundle_version=\"$(expr 5000 + $commit_count)\"\n    echo \"Setting CFBundleVersion: $bundle_version\"\n    /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $bundle_version\" \"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nelse\n    echo \"Not in a Git repo, not setting CFBundleVersion\"\nfi\n";
+			shellScript = "# based on http://tgoode.com/2014/06/05/sensible-way-increment-bundle-version-cfbundleversion-xcode\n# CFBundleVersion is git rev-list --count HEAD, not a file timestamp, so this\n# phase is always out of date and runs on every build.\nif git rev-parse --is-inside-work-tree 2> /dev/null > /dev/null; then\n    commit_count=\"$(git rev-list --count HEAD)\"\n    bundle_version=\"$(expr 5000 + $commit_count)\"\n    echo \"Setting CFBundleVersion: $bundle_version\"\n    /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $bundle_version\" \"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nelse\n    echo \"Not in a Git repo, not setting CFBundleVersion\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

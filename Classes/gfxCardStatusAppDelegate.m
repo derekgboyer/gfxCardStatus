@@ -167,8 +167,11 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
     // The display-reconfiguration callback invokes this off the main queue.
     // Power-source rules also refresh the menu on the main queue, so the GPU
     // update has to land there too.
+    // The main queue owns the block until it runs, and the delegate does not
+    // own that block, so naming self here does not create a cycle. Keeping
+    // self alive until the update runs matches the previous implicit retain.
     dispatch_async(dispatch_get_main_queue(), ^{
-        [_menuController updateMenu];
+        [self.menuController updateMenu];
         [[GSNotifier sharedInstance] showGPUChangeNotification:gpu];
     });
 }

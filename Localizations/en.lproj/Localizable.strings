@@ -69,6 +69,8 @@
 "AppleSiliconUnsupported" = "GPU switching isn't available on Apple silicon.";
 "AppleSiliconUnsupportedMessage" = "This Mac uses Apple silicon and doesn't have separate integrated and discrete GPUs to switch between. gfxCardStatus will stay in the menu bar, with switching controls disabled.";
 "OhISee"                = "Oh, I see.";
+"OK"                    = "OK";
+"Why"                   = "Why?";
 
 /* Miscellaneous notifications */
 "Can'tSwitchToIntegratedOnlySingular" = "You can't switch to Integrated Only while the following item is running:";

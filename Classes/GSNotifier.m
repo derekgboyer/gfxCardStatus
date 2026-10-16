@@ -130,8 +130,8 @@
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = Str(messageKey);
     alert.informativeText = descriptionText;
-    [alert addButtonWithTitle:@"OK"];
-    [alert addButtonWithTitle:@"Why?"];
+    [alert addButtonWithTitle:Str(@"OK")];
+    [alert addButtonWithTitle:Str(@"Why")];
 
     if ([alert runModal] == NSAlertSecondButtonReturn)
         GSOpenURL([NSURL URLWithString:kIntegratedOnlyMessageExplanationURL]);
