@@ -14,6 +14,7 @@
 #import "GSNotifier.h"
 #import "GSProcess.h"
 #import "GSPowerSourceController.h"
+#import "GSRuleEngine.h"
 
 #define kShouldUseSmartMenuBarIconsKeyPath @"prefsDict.shouldUseSmartMenuBarIcons"
 
@@ -31,6 +32,8 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 - (NSMenu *)_powerModeMenu;
 - (NSString *)_menuTitleForPreferenceKey:(NSString *)key;
 - (void)_powerSourceStateDidChange:(NSNotification *)notification;
+- (void)_rebuildProfilesMenu;
+- (void)_rebuildHistoryMenu;
 @end
 
 @implementation GSMenuController {
@@ -42,6 +45,12 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     NSMenuItem *_pluggedInItem;
     NSMenu *_onBatteryMenu;
     NSMenu *_pluggedInMenu;
+    NSMenuItem *_pauseItem;
+    NSMenuItem *_resumeItem;
+    NSMenuItem *_profilesItem;
+    NSMenu *_profilesMenu;
+    NSMenuItem *_historyItem;
+    NSMenu *_historyMenu;
 }
 
 @synthesize statusMenu;
@@ -88,6 +97,9 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     if (_observingPowerSource) {
         [[NSNotificationCenter defaultCenter] removeObserver:self
                                                         name:GSPowerSourceStateDidChangeNotification
+                                                      object:nil];
+        [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                        name:GSRuleEngineStateDidChangeNotification
                                                       object:nil];
     }
 }
@@ -139,6 +151,10 @@ static void *GSAppearanceContext = &GSAppearanceContext;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(_powerSourceStateDidChange:)
                                                      name:GSPowerSourceStateDidChangeNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(_powerSourceStateDidChange:)
+                                                     name:GSRuleEngineStateDidChangeNotification
                                                    object:nil];
         _observingPowerSource = YES;
     }
@@ -232,6 +248,7 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     if (sender == switchGPUs) {
         GSLogInfo(@"Switching GPUs...");
         [[GSMux defaultMux] setMode:GSSwitcherModeToggleGPU];
+        [[GSRuleEngine sharedEngine] noteUserDidSwitchToMode:GSSwitcherModeToggleGPU source:Str(@"StatusMenu")];
         return;
     }
 
@@ -239,6 +256,7 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     if ([sender state] == NSControlStateValueOn) return;
 
     BOOL retval = NO;
+    GSSwitcherMode chosen = GSSwitcherModeDynamicSwitching;
 
     if (sender == integratedOnly) {
         NSArray *taskList = [GSProcess getTaskList];
@@ -256,16 +274,19 @@ static void *GSAppearanceContext = &GSAppearanceContext;
         }
 
         GSLogInfo(@"Setting Integrated Only...");
+        chosen = GSSwitcherModeForceIntegrated;
         retval = [[GSMux defaultMux] setMode:GSSwitcherModeForceIntegrated];
     }
 
     if (sender == discreteOnly) { 
         GSLogInfo(@"Setting Discrete Only...");
+        chosen = GSSwitcherModeForceDiscrete;
         retval = [[GSMux defaultMux] setMode:GSSwitcherModeForceDiscrete];
     }
 
     if (sender == dynamicSwitching) {
         GSLogInfo(@"Setting Dynamic Switching...");
+        chosen = GSSwitcherModeDynamicSwitching;
         retval = [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
     }
 
@@ -275,9 +296,8 @@ static void *GSAppearanceContext = &GSAppearanceContext;
         [discreteOnly setState:(sender == discreteOnly ? NSControlStateValueOn : NSControlStateValueOff)];
         [dynamicSwitching setState:(sender == dynamicSwitching ? NSControlStateValueOn : NSControlStateValueOff)];
 
-        // Holds until the power source changes, or until the user turns the
-        // power-source feature on or edits the choice for the current source.
-        [[GSPowerSourceController sharedController] noteManualModeChange];
+        // Holds until the power source changes, Resume, or a profile change.
+        [[GSRuleEngine sharedEngine] noteUserDidSwitchToMode:chosen source:Str(@"StatusMenu")];
         // Title and checkmarks, without inserting or removing items while the
         // status menu is still tracking this click.
         [self _updatePowerControls];
@@ -288,6 +308,31 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 {
     BOOL enabled = ![_prefs shouldUsePowerSourceBasedSwitching];
     [_prefs setBool:enabled forKey:GSShouldUsePowerSourceBasedSwitchingKey];
+    [self _updatePowerControls];
+}
+
+- (IBAction)pauseAutomaticRules:(id)sender
+{
+    (void)sender;
+    [[GSRuleEngine sharedEngine] pauseForOneHour];
+    [self _updatePowerControls];
+}
+
+- (IBAction)resumeAutomaticRules:(id)sender
+{
+    (void)sender;
+    [[GSRuleEngine sharedEngine] resumeAutomaticRules];
+    [self _updatePowerControls];
+}
+
+- (IBAction)selectProfile:(id)sender
+{
+    if (![sender isKindOfClass:[NSMenuItem class]])
+        return;
+    NSString *name = [sender representedObject];
+    if (![name isKindOfClass:[NSString class]])
+        return;
+    [[GSRuleEngine sharedEngine] activateProfileNamed:name];
     [self _updatePowerControls];
 }
 
@@ -307,10 +352,19 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 
 - (void)menuNeedsUpdate:(NSMenu *)menu
 {
+    if (menu == _profilesMenu) {
+        [self _rebuildProfilesMenu];
+        return;
+    }
+    if (menu == _historyMenu) {
+        [self _rebuildHistoryMenu];
+        return;
+    }
     if (![[GSMux defaultMux] isOpen])
         return;
 
     [self _updateProcessList];
+    [self _updatePowerControls];
 }
 
 - (void)menuWillOpen:(NSMenu *)menu
@@ -356,6 +410,10 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     [_powerSourceSwitchingItem setHidden:YES];
     [_onBatteryItem setHidden:YES];
     [_pluggedInItem setHidden:YES];
+    [_pauseItem setHidden:YES];
+    [_resumeItem setHidden:YES];
+    [_profilesItem setHidden:YES];
+    [_historyItem setHidden:YES];
 
     if (_statusItem != nil)
         _statusItem.button.appearsDisabled = YES;
@@ -407,6 +465,18 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 
 - (void)_updateMenuBarIconText:(BOOL)__unused isUsingIntegrated cardString:(NSString *)cardString
 {
+    if ([[GSMux defaultMux] isOpen] && [_prefs boolForKey:GSMenuBarShowsGPUNameKey]) {
+        NSString *name = cardString.length ? cardString : @"?";
+        if (name.length > 18)
+            name = [[name substringToIndex:17] stringByAppendingString:@"…"];
+        NSDictionary *attributes = @{
+            NSFontAttributeName: [NSFont boldSystemFontOfSize:12],
+            NSForegroundColorAttributeName: [NSColor labelColor]
+        };
+        _statusItem.button.attributedTitle = [[NSAttributedString alloc] initWithString:name attributes:attributes];
+        return;
+    }
+
     // Grab the first character of GPU string for the menu bar icon.
     unichar firstLetter;
 
@@ -476,6 +546,30 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     [statusMenu insertItem:_powerSourceSwitchingItem atIndex:index++];
     [statusMenu insertItem:_onBatteryItem atIndex:index++];
     [statusMenu insertItem:_pluggedInItem atIndex:index++];
+
+    _pauseItem = [[NSMenuItem alloc] initWithTitle:Str(@"PauseAutomaticRules")
+                                           action:@selector(pauseAutomaticRules:)
+                                    keyEquivalent:@""];
+    _pauseItem.target = self;
+    _resumeItem = [[NSMenuItem alloc] initWithTitle:Str(@"ResumeAutomaticRules")
+                                            action:@selector(resumeAutomaticRules:)
+                                     keyEquivalent:@""];
+    _resumeItem.target = self;
+
+    _profilesMenu = [[NSMenu alloc] init];
+    _profilesMenu.delegate = self;
+    _profilesItem = [[NSMenuItem alloc] initWithTitle:Str(@"Profiles") action:nil keyEquivalent:@""];
+    _profilesItem.submenu = _profilesMenu;
+
+    _historyMenu = [[NSMenu alloc] init];
+    _historyMenu.delegate = self;
+    _historyItem = [[NSMenuItem alloc] initWithTitle:Str(@"GPUHistory") action:nil keyEquivalent:@""];
+    _historyItem.submenu = _historyMenu;
+
+    [statusMenu insertItem:_pauseItem atIndex:index++];
+    [statusMenu insertItem:_resumeItem atIndex:index++];
+    [statusMenu insertItem:_profilesItem atIndex:index++];
+    [statusMenu insertItem:_historyItem atIndex:index++];
 }
 
 - (NSMenu *)_powerModeMenu
@@ -529,7 +623,7 @@ static void *GSAppearanceContext = &GSAppearanceContext;
         sourceName = Str(@"ACAdapter");
 
     NSString *title = [Str(@"PowerSource") stringByReplacingOccurrencesOfString:@"%%" withString:sourceName];
-    if (power.featureAvailable && power.manualOverrideActive && [_prefs shouldUsePowerSourceBasedSwitching])
+    if (power.featureAvailable && power.manualOverrideActive && [[GSRuleEngine sharedEngine] anyAutomaticRuleEnabled])
         title = [NSString stringWithFormat:@"%@ (%@)", title, Str(@"ManualOverride")];
 
     [currentPowerSource setTitle:title];
@@ -538,6 +632,22 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     [_powerSourceSwitchingItem setHidden:NO];
     [_onBatteryItem setHidden:NO];
     [_pluggedInItem setHidden:NO];
+    [_pauseItem setHidden:!power.featureAvailable];
+    [_resumeItem setHidden:!power.featureAvailable];
+    [_profilesItem setHidden:!power.featureAvailable];
+    [_historyItem setHidden:!power.featureAvailable];
+
+    GSRuleEngine *rules = [GSRuleEngine sharedEngine];
+    _pauseItem.enabled = !rules.paused;
+    if (rules.paused && rules.pausedUntil) {
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        formatter.timeStyle = NSDateFormatterShortStyle;
+        formatter.dateStyle = NSDateFormatterNoStyle;
+        _pauseItem.title = [NSString stringWithFormat:Str(@"PausedUntil"), [formatter stringFromDate:rules.pausedUntil]];
+    } else {
+        _pauseItem.title = Str(@"PauseAutomaticRules");
+    }
+    _resumeItem.enabled = rules.paused || power.manualOverrideActive;
 
     _powerSourceSwitchingItem.state = [_prefs shouldUsePowerSourceBasedSwitching] ? NSControlStateValueOn : NSControlStateValueOff;
     [self _markModeMenu:_onBatteryMenu selected:[_prefs modeForBattery]];
@@ -548,6 +658,52 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 {
     for (NSMenuItem *item in menu.itemArray)
         item.state = (item.tag == (NSInteger)mode) ? NSControlStateValueOn : NSControlStateValueOff;
+}
+
+- (void)_rebuildProfilesMenu
+{
+    [_profilesMenu removeAllItems];
+    GSPreferences *prefs = _prefs;
+    NSString *active = [prefs activeProfileName];
+    NSArray *names = [prefs profileNames];
+    if (names.count == 0) {
+        NSMenuItem *empty = [[NSMenuItem alloc] initWithTitle:Str(@"NoProfiles") action:nil keyEquivalent:@""];
+        empty.enabled = NO;
+        [_profilesMenu addItem:empty];
+        return;
+    }
+    for (NSString *name in names) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:[prefs displayNameForProfile:name]
+                                                      action:@selector(selectProfile:)
+                                               keyEquivalent:@""];
+        item.target = self;
+        item.representedObject = name;
+        item.state = [name isEqualToString:active] ? NSControlStateValueOn : NSControlStateValueOff;
+        [_profilesMenu addItem:item];
+    }
+}
+
+- (void)_rebuildHistoryMenu
+{
+    [_historyMenu removeAllItems];
+    if (![_prefs boolForKey:GSHistoryEnabledKey]) {
+        NSMenuItem *off = [[NSMenuItem alloc] initWithTitle:Str(@"HistoryOff") action:nil keyEquivalent:@""];
+        off.enabled = NO;
+        [_historyMenu addItem:off];
+        return;
+    }
+    NSArray *lines = [[GSRuleEngine sharedEngine] historyMenuLines];
+    if (lines.count == 0) {
+        NSMenuItem *empty = [[NSMenuItem alloc] initWithTitle:Str(@"HistoryEmpty") action:nil keyEquivalent:@""];
+        empty.enabled = NO;
+        [_historyMenu addItem:empty];
+        return;
+    }
+    for (NSString *line in lines) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:line action:nil keyEquivalent:@""];
+        item.enabled = NO;
+        [_historyMenu addItem:item];
+    }
 }
 
 - (void)_powerSourceStateDidChange:(NSNotification *)__unused notification

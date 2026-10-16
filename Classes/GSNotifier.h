@@ -21,4 +21,10 @@
 // taskNames are display names, not the process dictionaries.
 - (void)showPowerRuleBlockedNotification:(NSArray *)taskNames;
 
+// ruleName is already localized. Shown even when GPU-change notifications are off.
+- (void)showRuleBlockedNotificationForRule:(NSString *)ruleName taskNames:(NSArray *)taskNames;
+- (void)showDiscreteOnBatteryAlertForMinutes:(NSInteger)minutes;
+- (void)showStatusNotification:(NSString *)summary;
+- (void)showCommandUnavailableNotification;
+
 @end

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Talk to a running gfxCardStatus. The menu-bar app cannot print to this
+# terminal, so "status" reads the file the app writes.
+set -eu
+
+usage() {
+    echo "Usage: gfxcardstatus integrated|discrete|dynamic|pause|resume|status|profile NAME" >&2
+    exit 1
+}
+
+if [ "$#" -lt 1 ]; then
+    usage
+fi
+
+command=$1
+case "$command" in
+    integrated|discrete|dynamic|pause|resume|status)
+        open "gfxcardstatus://$command"
+        ;;
+    profile)
+        if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+            usage
+        fi
+        encoded=$(python3 -c 'import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$2")
+        open "gfxcardstatus://profile/$encoded"
+        ;;
+    *)
+        usage
+        ;;
+esac
+
+if [ "$command" = "status" ]; then
+    status_file="$HOME/Library/Application Support/gfxCardStatus/status.txt"
+    sleep 0.6
+    if [ -f "$status_file" ]; then
+        cat "$status_file"
+    else
+        echo "gfxCardStatus did not write $status_file" >&2
+        exit 1
+    fi
+fi

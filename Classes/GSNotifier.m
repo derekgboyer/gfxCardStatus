@@ -10,6 +10,7 @@
 #import "NSAttributedString+Hyperlink.h"
 #import "GSMux.h"
 #import "GSPreferences.h"
+#import "GSProcess.h"
 
 #import <UserNotifications/UserNotifications.h>
 
@@ -18,9 +19,13 @@
 #define kIntegratedOnlyMessageExplanationURL [kApplicationWebsiteURL stringByAppendingString:@"/switching.html#integrated-only-mode-limitations"]
 #define kGPUChangeNotificationIdentifier @"com.codykrieger.gfxCardStatus.gpu-changed"
 #define kPowerRuleBlockedNotificationIdentifier @"com.codykrieger.gfxCardStatus.power-rule-blocked"
+#define kDiscreteOnBatteryNotificationIdentifier @"com.codykrieger.gfxCardStatus.discrete-on-battery"
+#define kStatusNotificationIdentifier @"com.codykrieger.gfxCardStatus.status"
+#define kCommandUnavailableNotificationIdentifier @"com.codykrieger.gfxCardStatus.command-unavailable"
 
 @interface GSNotifier () <UNUserNotificationCenterDelegate>
 - (NSString *)_keyForNotificationType:(GSGPUType)type;
+- (void)_postNotificationWithIdentifier:(NSString *)identifier title:(NSString *)title body:(NSString *)body;
 @end
 
 @implementation GSNotifier {
@@ -67,12 +72,23 @@
     NSString *title = Str(key);
     NSString *cardName = type == GSGPUTypeIntegrated ? [GSGPU integratedGPUName] : [GSGPU discreteGPUName];
     NSString *message = [NSString stringWithFormat:Str([key stringByAppendingString:@"Message"]), cardName];
+    GSPreferences *prefs = [GSPreferences sharedInstance];
+    if (prefs.shouldDisplayNotifications && [prefs boolForKey:GSNotificationListsGPUAppsKey]) {
+        NSMutableArray *names = [NSMutableArray array];
+        for (NSDictionary *dict in [GSProcess getTaskList]) {
+            NSString *name = dict[kTaskItemName];
+            if (name.length)
+                [names addObject:name];
+        }
+        if (names.count)
+            message = [NSString stringWithFormat:@"%@\n%@", message, [names componentsJoinedByString:@", "]];
+    }
 
     // Make sure that we don't display the notification if it's the same message
     // as the last one we fired off. Because that's unbelievably annoying. Also
     // check to make sure the user even wants to see the notifications in the
     // first place.
-    if (![message isEqualToString:_lastMessage] && [GSPreferences sharedInstance].shouldDisplayNotifications) {
+    if (![message isEqualToString:_lastMessage] && prefs.shouldDisplayNotifications) {
         UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
         content.title = title;
         content.body = message;
@@ -139,31 +155,73 @@
 
 - (void)showPowerRuleBlockedNotification:(NSArray *)taskNames
 {
+    [self showRuleBlockedNotificationForRule:Str(@"PowerSourceRule") taskNames:taskNames];
+}
+
+- (void)showRuleBlockedNotificationForRule:(NSString *)ruleName taskNames:(NSArray *)taskNames
+{
     NSString *list = [taskNames componentsJoinedByString:@", "];
-    NSString *body = Str(@"PowerRuleBlocked");
+    NSString *body = [NSString stringWithFormat:Str(@"RuleBlocked"), ruleName ?: @""];
     if (list.length)
         body = [NSString stringWithFormat:@"%@\n%@", body, list];
+    [self _postNotificationWithIdentifier:kPowerRuleBlockedNotificationIdentifier
+                                    title:Str(@"IntegratedOnly")
+                                     body:body];
+}
 
-    NSString *title = Str(@"IntegratedOnly");
+- (void)showDiscreteOnBatteryAlertForMinutes:(NSInteger)minutes
+{
+    NSString *body = [NSString stringWithFormat:Str(@"DiscreteOnBatteryMessage"), (long)minutes];
+    if ([[GSPreferences sharedInstance] boolForKey:GSNotificationListsGPUAppsKey]) {
+        NSMutableArray *names = [NSMutableArray array];
+        for (NSDictionary *dict in [GSProcess getTaskList]) {
+            NSString *name = dict[kTaskItemName];
+            if (name.length)
+                [names addObject:name];
+        }
+        if (names.count)
+            body = [NSString stringWithFormat:@"%@\n%@", body, [names componentsJoinedByString:@", "]];
+    }
+    [self _postNotificationWithIdentifier:kDiscreteOnBatteryNotificationIdentifier
+                                    title:Str(@"DiscreteOnBatteryTitle")
+                                     body:body];
+}
+
+- (void)showStatusNotification:(NSString *)summary
+{
+    [self _postNotificationWithIdentifier:kStatusNotificationIdentifier
+                                    title:Str(@"GPUStatus")
+                                     body:summary ?: @""];
+}
+
+- (void)showCommandUnavailableNotification
+{
+    [self _postNotificationWithIdentifier:kCommandUnavailableNotificationIdentifier
+                                    title:Str(@"GPUSwitchingUnavailable")
+                                     body:Str(@"CommandUnavailable")];
+}
+
+- (void)_postNotificationWithIdentifier:(NSString *)identifier title:(NSString *)title body:(NSString *)body
+{
     UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
     // Authorization is requested when the notifier is created, but that
     // completion can still be in flight if a rule trips during launch.
     [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
                           completionHandler:^(BOOL granted, NSError *error) {
         if (error || !granted) {
-            GSLogError(@"Power-source notification not shown (granted=%d): %@", granted, error);
+            GSLogError(@"Notification not shown (granted=%d): %@", granted, error);
             return;
         }
 
         UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
-        content.title = title;
-        content.body = body;
-        UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:kPowerRuleBlockedNotificationIdentifier
+        content.title = title ?: @"";
+        content.body = body ?: @"";
+        UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:identifier
                                                                               content:content
                                                                               trigger:nil];
         [center addNotificationRequest:request withCompletionHandler:^(NSError *addError) {
             if (addError)
-                GSLogError(@"Failed to deliver power-source notification: %@", addError);
+                GSLogError(@"Failed to deliver notification: %@", addError);
         }];
     }];
 }
