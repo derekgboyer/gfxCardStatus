@@ -6,9 +6,8 @@
 #import "GSPowerSourceController.h"
 #import "GSGPU.h"
 #import "GSMux.h"
-#import "GSNotifier.h"
 #import "GSPreferences.h"
-#import "GSProcess.h"
+#import "GSRuleEngine.h"
 
 #import <IOKit/ps/IOPowerSources.h>
 #import <IOKit/ps/IOPSKeys.h>
@@ -29,7 +28,7 @@ static void _powerSourceCallback(void *context);
 @interface GSPowerSourceController ()
 - (void)_handlePowerSourceCallback;
 - (void)_evaluatePowerSource;
-- (void)_applyForCurrentSource;
+- (void)_applyForEvent:(GSRuleEvent)event;
 - (NSString *)_keyPathForPreferenceKey:(NSString *)key;
 @end
 
@@ -38,10 +37,9 @@ static void _powerSourceCallback(void *context);
     GSPowerSource _currentSource;
     BOOL _started;
     BOOL _applying;
+    BOOL _launchApplyPending;
     CFRunLoopSourceRef _runLoopSource;
     NSTimer *_debounceTimer;
-    GSPowerSource _lastBlockedSource;
-    NSString *_lastBlockedSignature;
     BOOL _observingPreferences;
 }
 
@@ -60,7 +58,6 @@ static void _powerSourceCallback(void *context);
     self = [super init];
     if (self) {
         _currentSource = GSPowerSourceUnknown;
-        _lastBlockedSource = GSPowerSourceUnknown;
     }
     return self;
 }
@@ -80,6 +77,11 @@ static void _powerSourceCallback(void *context);
     return _tracker.manualOverride ? YES : NO;
 }
 
+- (BOOL)isMonitoring
+{
+    return _started;
+}
+
 - (BOOL)isFeatureAvailable
 {
     return [[GSMux defaultMux] isOpen] && ![GSGPU isLegacyMachine];
@@ -90,6 +92,7 @@ static void _powerSourceCallback(void *context);
     if (_started)
         return;
     _started = YES;
+    _launchApplyPending = YES;
     _tracker.manualOverride = manualOverride ? 1 : 0;
     _currentSource = [self _readPowerSource];
 
@@ -115,17 +118,21 @@ static void _powerSourceCallback(void *context);
 {
     if (!self.featureAvailable)
         return;
-    if (![[GSPreferences sharedInstance] shouldUsePowerSourceBasedSwitching])
+    if (![[GSRuleEngine sharedEngine] anyAutomaticRuleEnabled])
         return;
-
     if (_tracker.manualOverride)
         return;
 
     _tracker.manualOverride = 1;
-    // The hold replaces a pending automatic switch for this source.
-    _lastBlockedSignature = nil;
-    GSLogInfo(@"Manual GPU choice will hold until the power source changes.");
+    GSLogInfo(@"Manual GPU choice will hold until the power source changes, rules are resumed, or a profile is selected.");
     [self _postStateChange];
+}
+
+- (void)clearManualOverride
+{
+    if (!_tracker.manualOverride)
+        return;
+    _tracker.manualOverride = 0;
 }
 
 #pragma mark - Power source
@@ -192,92 +199,28 @@ static void _powerSourceCallback(void *context)
     _currentSource = source;
 
     int shouldApply = 0;
-    GSPowerSource previous = _tracker.lastSettledSource;
-    int wasSettled = _tracker.hasSettled;
     GSPowerNoteSource(&_tracker, source, &shouldApply);
-    if (wasSettled && _tracker.hasSettled && previous != _tracker.lastSettledSource)
-        _lastBlockedSignature = nil;
-
+    GSRuleEvent event = _launchApplyPending ? GSRuleEventLaunch : GSRuleEventContinuous;
+    _launchApplyPending = NO;
     if (shouldApply)
-        [self _applyForCurrentSource];
+        [self _applyForEvent:event];
     [self _postStateChange];
 }
 
-- (void)_applyForCurrentSource
+- (void)_applyForEvent:(GSRuleEvent)event
 {
-    if (_applying || !self.featureAvailable)
+    if (!self.featureAvailable)
         return;
-
-    GSPreferences *prefs = [GSPreferences sharedInstance];
-    id<GSMuxProtocol> mux = [GSMux defaultMux];
-    if (![mux isOpen])
-        return;
-
-    GSPowerContext ctx = {0};
-    ctx.featureEnabled = [prefs shouldUsePowerSourceBasedSwitching] ? 1 : 0;
-    ctx.manualOverride = _tracker.manualOverride;
-    ctx.source = _currentSource;
-    ctx.batteryMode = [prefs modeForBattery];
-    ctx.acMode = [prefs modeForACAdapter];
-    ctx.currentlyDynamic = [mux isUsingDynamicSwitching] ? 1 : 0;
-    ctx.currentlyIntegrated = [mux isUsingIntegratedGPU] ? 1 : 0;
-
-    NSArray *tasks = nil;
-    if (ctx.featureEnabled && !ctx.manualOverride
-        && (ctx.source == GSPowerSourceBattery || ctx.source == GSPowerSourceACAdapter)) {
-        GSPowerSourceBasedSwitchingMode desired = (ctx.source == GSPowerSourceBattery) ? ctx.batteryMode : ctx.acMode;
-        // The process walk is only needed when Integrated Only might run.
-        if (desired == GSPowerSourceBasedSwitchingModeIntegrated) {
-            tasks = [GSProcess getTaskList];
-            ctx.hasDiscreteDependencies = tasks.count > 0 ? 1 : 0;
-        }
-    }
-
-    GSPowerAction action = GSPowerDecide(&ctx);
-    if (action == GSPowerActionNone)
-        return;
-
-    if (action == GSPowerActionBlockedByDependencies) {
-        [self _noteBlockedTasks:tasks];
+    // setMode: sleeps on this thread. A power callback that arrives in the
+    // middle is asked to run again instead of starting a second switch.
+    if (_applying) {
+        [self _handlePowerSourceCallback];
         return;
     }
 
-    GSSwitcherMode mode;
-    if (action == GSPowerActionSwitchIntegrated)
-        mode = GSSwitcherModeForceIntegrated;
-    else if (action == GSPowerActionSwitchDiscrete)
-        mode = GSSwitcherModeForceDiscrete;
-    else if (action == GSPowerActionSwitchDynamic)
-        mode = GSSwitcherModeDynamicSwitching;
-    else
-        return;
-
-    GSLogInfo(@"Applying power-source rule. source=%d mode=%d", (int)_currentSource, (int)mode);
     _applying = YES;
-    BOOL switched = [mux setMode:mode];
+    [[GSRuleEngine sharedEngine] applyForEvent:event];
     _applying = NO;
-    if (!switched)
-        GSLogError(@"Power-source rule could not switch the GPU.");
-    else
-        _lastBlockedSignature = nil;
-}
-
-- (void)_noteBlockedTasks:(NSArray *)tasks
-{
-    NSMutableArray *names = [NSMutableArray array];
-    for (NSDictionary *dict in tasks) {
-        NSString *name = dict[kTaskItemName];
-        if (name.length)
-            [names addObject:name];
-    }
-    NSString *signature = [names componentsJoinedByString:@"\n"];
-    if (_lastBlockedSource == _currentSource && [signature isEqualToString:_lastBlockedSignature])
-        return;
-
-    _lastBlockedSource = _currentSource;
-    _lastBlockedSignature = [signature copy];
-    GSLogInfo(@"Power-source rule skipped Integrated Only because of: %@", names);
-    [[GSNotifier sharedInstance] showPowerRuleBlockedNotification:names];
 }
 
 - (void)_postStateChange
@@ -343,6 +286,10 @@ static void _powerSourceCallback(void *context)
         return;
     }
 
+    // A profile load writes every rule key at once and applies once itself.
+    if ([[GSRuleEngine sharedEngine] isSuppressingPreferenceApplication])
+        return;
+
     // Bindings update the in-memory dictionary immediately and only flush it
     // when the preferences window closes. Persist now so a cable change
     // before that close still sees the edited rule after a relaunch.
@@ -359,8 +306,11 @@ static void _powerSourceCallback(void *context)
     GSPreferences *prefs = [GSPreferences sharedInstance];
     BOOL enabled = [prefs shouldUsePowerSourceBasedSwitching];
     if (!enabled) {
-        if (context == GSPowerMasterContext)
+        // Other rules (per-app, display, schedule) still get a turn.
+        if (context == GSPowerMasterContext) {
             _tracker.manualOverride = 0;
+            [self _applyForEvent:GSRuleEventContinuous];
+        }
         return;
     }
 
@@ -375,8 +325,7 @@ static void _powerSourceCallback(void *context)
 
     // Editing the live rule, or turning the feature on, ends a manual hold.
     _tracker.manualOverride = 0;
-    _lastBlockedSignature = nil;
-    [self _applyForCurrentSource];
+    [self _applyForEvent:GSRuleEventContinuous];
 }
 
 @end

@@ -14,6 +14,7 @@
 #import "GSMux.h"
 #import "GSNotifier.h"
 #import "GSPowerSourceController.h"
+#import "GSRuleEngine.h"
 
 #define kHasSeenOneTimeNotificationKey @"hasSeenVersionTwoMessage"
 #define kShouldCheckForUpdatesOnStartupKeyPath @"prefsDict.shouldCheckForUpdatesOnStartup"
@@ -22,6 +23,8 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
 @implementation gfxCardStatusAppDelegate {
     BOOL _observingUpdateCheck;
+    BOOL _readyForURLs;
+    NSMutableArray *_pendingURLs;
 }
 
 #pragma mark - Initialization
@@ -37,27 +40,45 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
     // menu bar item can explain that switching doesn't apply.
     BOOL switchingAvailable = [[GSMux defaultMux] switcherOpen];
     BOOL commandLineOverride = NO;
+    NSArray *args = [[NSProcessInfo processInfo] arguments];
+    GSRuleEngine *rules = [GSRuleEngine sharedEngine];
+    // --pause, --resume, --profile, and --status apply even when this Mac
+    // cannot switch. Mode flags below require the mux.
+    [rules consumeLaunchArguments:args];
     if (!switchingAvailable) {
         GSLogError(@"Can't open connection to AppleGraphicsControl. GPU switching isn't available on this Mac.");
     } else {
         GSLogInfo(@"GPUs present: %@", [GSGPU getGPUNames]);
         GSLogInfo(@"Integrated GPU name: %@", [GSGPU integratedGPUName]);
         GSLogInfo(@"Discrete GPU name: %@", [GSGPU discreteGPUName]);
-        
-        NSArray *args = [[NSProcessInfo processInfo] arguments];
+
         if ([args indexOfObject:@"--discrete"] != NSNotFound) {
             [[GSMux defaultMux] setMode:GSSwitcherModeForceDiscrete];
+            [rules noteUserDidSwitchToMode:GSSwitcherModeForceDiscrete source:Str(@"LaunchArgument")];
             commandLineOverride = YES;
         } else if ([args indexOfObject:@"--integrated"] != NSNotFound) {
-            [[GSMux defaultMux] setMode:GSSwitcherModeForceIntegrated];
-            commandLineOverride = YES;
+            NSArray *tasks = [GSProcess getTaskList];
+            if (tasks.count > 0) {
+                NSMutableArray *names = [NSMutableArray array];
+                for (NSDictionary *dict in tasks) {
+                    NSString *name = dict[kTaskItemName];
+                    if (name.length)
+                        [names addObject:name];
+                }
+                [[GSNotifier sharedInstance] showRuleBlockedNotificationForRule:Str(@"LaunchArgument") taskNames:names];
+            } else {
+                [[GSMux defaultMux] setMode:GSSwitcherModeForceIntegrated];
+                [rules noteUserDidSwitchToMode:GSSwitcherModeForceIntegrated source:Str(@"LaunchArgument")];
+                commandLineOverride = YES;
+            }
         } else if ([args indexOfObject:@"--dynamic"] != NSNotFound) {
             [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
+            [rules noteUserDidSwitchToMode:GSSwitcherModeDynamicSwitching source:Str(@"LaunchArgument")];
             commandLineOverride = YES;
-        } else if (![GSGPU isLegacyMachine] && ![_prefs shouldUsePowerSourceBasedSwitching]) {
+        } else if (![GSGPU isLegacyMachine] && ![rules shouldHandleLaunch]) {
             // Set the machine to dynamic switching to get it out of any kind of
-            // weird state from the get go. Skipped when power-source rules are
-            // on: those rules, including Don't Change, decide the launch mode.
+            // weird state from the get go. Skipped when an automatic rule
+            // handles launch, including power-source Don't Change.
             [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
         }
 
@@ -118,6 +139,25 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
     // Check for updates if the user has them enabled.
     if ([_prefs shouldCheckForUpdatesOnStartup])
         [_updaterController.updater checkForUpdatesInBackground];
+
+    _readyForURLs = YES;
+    if (_pendingURLs.count)
+        [[GSRuleEngine sharedEngine] handleURLs:_pendingURLs];
+    _pendingURLs = nil;
+    if ([[GSRuleEngine sharedEngine] takeStatusRequest])
+        [[GSRuleEngine sharedEngine] publishStatusNotifying:YES];
+}
+
+- (void)application:(NSApplication *)application openURLs:(NSArray<NSURL *> *)urls
+{
+    (void)application;
+    if (!_readyForURLs) {
+        if (!_pendingURLs)
+            _pendingURLs = [NSMutableArray array];
+        [_pendingURLs addObjectsFromArray:urls];
+        return;
+    }
+    [[GSRuleEngine sharedEngine] handleURLs:urls];
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
@@ -173,6 +213,7 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.menuController updateMenu];
         [[GSNotifier sharedInstance] showGPUChangeNotification:gpu];
+        [[GSRuleEngine sharedEngine] noteGPUChangedTo:gpu];
     });
 }
 
