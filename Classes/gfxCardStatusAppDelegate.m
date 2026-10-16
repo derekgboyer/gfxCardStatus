@@ -29,12 +29,12 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
     // a first-time run.
     _prefs = [GSPreferences sharedInstance];
 
-    // Attempt to open a connection to AppleGraphicsControl.
-    if (![[GSMux defaultMux] switcherOpen]) {
-        GSLogError(@"Can't open connection to AppleGraphicsControl. This probably isn't a gfxCardStatus-compatible machine.");
-        
-        [[GSNotifier sharedInstance] showUnsupportedMachineMessage];
-        [_menuController quit:self];
+    // Attempt to open a connection to AppleGraphicsControl. Apple silicon and
+    // other Macs without a mux don't have this driver; keep running so the
+    // menu bar item can explain that switching doesn't apply.
+    BOOL switchingAvailable = [[GSMux defaultMux] switcherOpen];
+    if (!switchingAvailable) {
+        GSLogError(@"Can't open connection to AppleGraphicsControl. GPU switching isn't available on this Mac.");
     } else {
         GSLogInfo(@"GPUs present: %@", [GSGPU getGPUNames]);
         GSLogInfo(@"Integrated GPU name: %@", [GSGPU integratedGPUName]);
@@ -52,10 +52,10 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
             // weird state from the get go.
             [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
         }
-    }
 
-    // Now accepting GPU change notifications! Apply at your nearest GSGPU today.
-    [GSGPU registerForGPUChangeNotifications:self];
+        // Now accepting GPU change notifications! Apply at your nearest GSGPU today.
+        [GSGPU registerForGPUChangeNotifications:self];
+    }
 
     // Register with NSWorkspace for system shutdown notifications to ensure
     // proper termination in the event of system shutdown and/or user logout.
@@ -68,6 +68,11 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
     // Initialize the menu bar icon and hook the menu up to it.
     [_menuController setupMenu];
+
+    if (!switchingAvailable && ![_prefs boolForKey:@"hasSeenGPUSwitchingUnavailableMessage"]) {
+        [[GSNotifier sharedInstance] showGPUSwitchingUnavailableMessage];
+        [_prefs setBool:YES forKey:@"hasSeenGPUSwitchingUnavailableMessage"];
+    }
 
     // Show the one-time startup notification asking users to be kind and donate
     // if they like gfxCardStatus. Then make it go away forever.
@@ -125,7 +130,7 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 {
     // Set the machine to dynamic switching before shutdown to avoid machine restarting
     // stuck in a forced GPU mode.
-    if (![GSGPU isLegacyMachine])
+    if ([[GSMux defaultMux] isOpen] && ![GSGPU isLegacyMachine])
         [[GSMux defaultMux] setMode:GSSwitcherModeDynamicSwitching];
 
     GSLogDebug(@"Termination notification received. Going to Dynamic Switching.");

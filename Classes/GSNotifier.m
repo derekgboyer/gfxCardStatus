@@ -107,11 +107,13 @@
     [versionInfo runModal];
 }
 
-- (void)showUnsupportedMachineMessage
+- (void)showGPUSwitchingUnavailableMessage
 {
+    BOOL appleSilicon = [GSGPU isAppleSiliconMac];
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = Str(@"UnsupportedMachine");
-    alert.informativeText = @"";
+    alert.alertStyle = NSAlertStyleInformational;
+    alert.messageText = Str(appleSilicon ? @"AppleSiliconUnsupported" : @"UnsupportedMachine");
+    alert.informativeText = Str(appleSilicon ? @"AppleSiliconUnsupportedMessage" : @"UnsupportedMachineMessage");
     [alert addButtonWithTitle:Str(@"OhISee")];
     [alert runModal];
 }

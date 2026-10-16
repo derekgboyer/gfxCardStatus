@@ -32,6 +32,7 @@
 @property (weak) IBOutlet NSMenuItem *integratedOnly;
 @property (weak) IBOutlet NSMenuItem *discreteOnly;
 @property (weak) IBOutlet NSMenuItem *dynamicSwitching;
+@property (weak) IBOutlet NSMenuItem *switchingUnavailableItem;
 
 // process list menu items
 @property (weak) IBOutlet NSMenuItem *processesSeparator;

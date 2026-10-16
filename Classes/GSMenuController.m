@@ -21,6 +21,7 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 
 @interface GSMenuController (Internal)
 - (void)_localizeMenu;
+- (void)_updateMenuForUnavailableSwitching;
 - (void)_updateProcessList;
 - (void)_updateMenuBarIconText:(BOOL)isUsingIntegrated cardString:(NSString *)cardString;
 @end
@@ -42,6 +43,7 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 @synthesize integratedOnly;
 @synthesize discreteOnly;
 @synthesize dynamicSwitching;
+@synthesize switchingUnavailableItem;
 @synthesize processesSeparator;
 @synthesize dependentProcesses;
 @synthesize processList;
@@ -111,7 +113,15 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 
 - (void)updateMenu
 {
+    if (![[GSMux defaultMux] isOpen]) {
+        [self _updateMenuForUnavailableSwitching];
+        return;
+    }
+
     GSLogDebug(@"Updating status...");
+
+    _statusItem.button.appearsDisabled = NO;
+    [switchingUnavailableItem setHidden:YES];
 
     BOOL isUsingIntegrated = [GSMux defaultMux].isUsingIntegratedGPU;
 
@@ -232,6 +242,9 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 
 - (void)menuNeedsUpdate:(NSMenu *)menu
 {
+    if (![[GSMux defaultMux] isOpen])
+        return;
+
     [self _updateProcessList];
 }
 
@@ -256,10 +269,29 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     [visitWebsiteItem setTitle:[Str(visitWebsiteItem.title) stringByReplacingOccurrencesOfString:@"%%" withString:kApplicationWebsiteURL]];
     NSArray *localized = [NSArray arrayWithObjects:updateItem, preferencesItem,
                           quitItem, switchGPUs, integratedOnly, discreteOnly, 
-                          dynamicSwitching, dependentProcesses, processList, 
+                          dynamicSwitching, switchingUnavailableItem, dependentProcesses, processList, 
                           nil];
     for (NSButton *loc in localized)
         [loc setTitle:Str([loc title])];
+}
+
+- (void)_updateMenuForUnavailableSwitching
+{
+    [switchGPUs setHidden:YES];
+    [integratedOnly setHidden:YES];
+    [discreteOnly setHidden:YES];
+    [dynamicSwitching setHidden:YES];
+    [switchingUnavailableItem setHidden:NO];
+    [processList setHidden:YES];
+    [processesSeparator setHidden:YES];
+    [dependentProcesses setHidden:YES];
+    [currentCard setTitle:Str(@"GPUSwitchingUnavailable")];
+
+    if (_statusItem != nil)
+        _statusItem.button.appearsDisabled = YES;
+
+    // A dash stands in for the usual i/d (or vendor) glyph.
+    [self _updateMenuBarIconText:NO cardString:@"–"];
 }
 
 - (void)_updateProcessList
@@ -307,9 +339,13 @@ static void *GSAppearanceContext = &GSAppearanceContext;
 {
     // Grab the first character of GPU string for the menu bar icon.
     unichar firstLetter;
-    
-    if ([GSGPU isLegacyMachine] || ![_prefs shouldUseSmartMenuBarIcons]) {
+
+    if (![[GSMux defaultMux] isOpen]) {
+        firstLetter = [@"–" characterAtIndex:0];
+    } else if ([GSGPU isLegacyMachine] || ![_prefs shouldUseSmartMenuBarIcons]) {
         firstLetter = [GSMux defaultMux].isUsingIntegratedGPU ? 'i' : 'd';
+    } else if (cardString.length == 0) {
+        firstLetter = '?';
     } else {
         firstLetter = [cardString characterAtIndex:0];
     }
