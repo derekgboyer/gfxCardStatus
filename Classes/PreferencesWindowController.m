@@ -30,9 +30,8 @@
         return nil;
     
     NSWindow *prefsWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 200)
-                                                         styleMask:(NSTitledWindowMask | NSClosableWindowMask) 
+                                                         styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
                                                            backing:NSBackingStoreBuffered defer:YES];
-    prefsWindow.showsToolbarButton = NO;
     
     // We flush preferences to disk when the preferences window is closed, hence
     // setting the window's delegate to the preferences object. So we know when

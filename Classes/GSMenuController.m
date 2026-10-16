@@ -17,6 +17,7 @@
 #define kShouldUseSmartMenuBarIconsKeyPath @"prefsDict.shouldUseSmartMenuBarIcons"
 
 static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
+static void *GSAppearanceContext = &GSAppearanceContext;
 
 @interface GSMenuController (Internal)
 - (void)_localizeMenu;
@@ -24,7 +25,9 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
 - (void)_updateMenuBarIconText:(BOOL)isUsingIntegrated cardString:(NSString *)cardString;
 @end
 
-@implementation GSMenuController
+@implementation GSMenuController {
+    BOOL _observingAppearance;
+}
 
 @synthesize statusMenu;
 
@@ -64,12 +67,15 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
 - (void)dealloc
 {
     [_prefs removeObserver:self forKeyPath:kShouldUseSmartMenuBarIconsKeyPath context:GSSmartMenuBarIconsContext];
+    if (_observingAppearance)
+        [NSApp removeObserver:self forKeyPath:@"effectiveAppearance" context:GSAppearanceContext];
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
 {
-    if (context == GSSmartMenuBarIconsContext) {
-        GSLogDebug(@"Use smart menu bar icons value changed: %@", change[NSKeyValueChangeNewKey]);
+    if (context == GSSmartMenuBarIconsContext || context == GSAppearanceContext) {
+        if (context == GSSmartMenuBarIconsContext)
+            GSLogDebug(@"Use smart menu bar icons value changed: %@", change[NSKeyValueChangeNewKey]);
         [self updateMenu];
         return;
     }
@@ -84,8 +90,14 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
     [statusMenu setDelegate:self];
     
     _statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
-    [_statusItem setMenu:statusMenu];
-    [_statusItem setHighlightMode:YES];
+    _statusItem.menu = statusMenu;
+    if (!_observingAppearance) {
+        [NSApp addObserver:self
+               forKeyPath:@"effectiveAppearance"
+                  options:0
+                  context:GSAppearanceContext];
+        _observingAppearance = YES;
+    }
     
     BOOL isLegacyMachine = [GSGPU isLegacyMachine];
     [switchGPUs setHidden:!isLegacyMachine];
@@ -112,9 +124,9 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
         GSLogInfo(@"Using dynamic switching?: %d", dynamic);
         GSLogInfo(@"Using old-style switching policy?: %d", [GSMux defaultMux].isUsingOldStyleSwitchPolicy);
 
-        [integratedOnly setState:(isUsingIntegrated && !dynamic) ? NSOnState : NSOffState];
-        [discreteOnly setState:(!isUsingIntegrated && !dynamic) ? NSOnState : NSOffState];
-        [dynamicSwitching setState:dynamic ? NSOnState : NSOffState];
+        [integratedOnly setState:(isUsingIntegrated && !dynamic) ? NSControlStateValueOn : NSControlStateValueOff];
+        [discreteOnly setState:(!isUsingIntegrated && !dynamic) ? NSControlStateValueOn : NSControlStateValueOff];
+        [dynamicSwitching setState:dynamic ? NSControlStateValueOn : NSControlStateValueOff];
     }
 
     [currentCard setTitle:[Str(@"Card") stringByReplacingOccurrencesOfString:@"%%" withString:gpuString]];
@@ -157,7 +169,7 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
 
 - (IBAction)openApplicationURL:(id)sender
 {
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:kApplicationWebsiteURL]];
+    GSOpenURL([NSURL URLWithString:kApplicationWebsiteURL]);
 }
 
 - (IBAction)quit:(id)sender
@@ -175,7 +187,7 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
     }
 
     // Don't go any further if the user clicked on an already-selected item.
-    if ([sender state] == NSOnState) return;
+    if ([sender state] == NSControlStateValueOn) return;
 
     BOOL retval = NO;
 
@@ -210,9 +222,9 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
 
     // Only change status in case of GPU switch success.
     if (retval) {
-        [integratedOnly setState:(sender == integratedOnly ? NSOnState : NSOffState)];
-        [discreteOnly setState:(sender == discreteOnly ? NSOnState : NSOffState)];
-        [dynamicSwitching setState:(sender == dynamicSwitching ? NSOnState : NSOffState)];
+        [integratedOnly setState:(sender == integratedOnly ? NSControlStateValueOn : NSControlStateValueOff)];
+        [discreteOnly setState:(sender == discreteOnly ? NSControlStateValueOn : NSControlStateValueOff)];
+        [dynamicSwitching setState:(sender == dynamicSwitching ? NSControlStateValueOn : NSControlStateValueOff)];
     }
 }
 
@@ -303,37 +315,25 @@ static void *GSSmartMenuBarIconsContext = &GSSmartMenuBarIconsContext;
     }
 
     NSString *letter = [[NSString stringWithFormat:@"%C", firstLetter] lowercaseString];
-    int fontSize = ([letter isEqualToString:@"n"] || [letter isEqualToString:@"a"] ? 19 : 18);
+    CGFloat fontSize = ([letter isEqualToString:@"n"] || [letter isEqualToString:@"a"] ? 19.0 : 18.0);
 
-    // Set our font style.
+    // Set our font style. labelColor follows the menu bar appearance, so the
+    // glyph stays readable in Dark Mode.
     NSFontManager *fontManager = [NSFontManager sharedFontManager];
     NSFont *boldItalic = [fontManager fontWithFamily:@"Georgia"
                                               traits:NSBoldFontMask|NSItalicFontMask
                                               weight:0
                                                 size:fontSize];
 
-    // Quick fix for menubar icon offset in macOS Big Sur
-    double baselineOffset = 2.0;
-    NSProcessInfo* processInfo = [NSProcessInfo processInfo];
-    
-    // [NSProcessInfo operatingSystemVersion] is only available since macOS 10.10
-    if ([processInfo respondsToSelector:@selector(operatingSystemVersion)]) {
-        NSOperatingSystemVersion systemVersion = [processInfo operatingSystemVersion];
-        // 10.16 is for backward compatibility targeting 10.x SDK
-        if (systemVersion.majorVersion >= 11 || (systemVersion.majorVersion >= 10 && systemVersion.minorVersion >= 16)) {
-            baselineOffset = -1.0;
-        }
-    }
-    
-    NSDictionary *attributes = [[NSDictionary alloc] initWithObjectsAndKeys:
-                                boldItalic, NSFontAttributeName,
-                                [NSNumber numberWithDouble:baselineOffset], NSBaselineOffsetAttributeName, nil];
-    NSAttributedString *title = [[NSAttributedString alloc] 
-                                 initWithString:letter
-                                 attributes:attributes];
-    
-    // Finally set the menu bar item's text.
-    [_statusItem setAttributedTitle:title];
+    // Menu bar metrics from macOS 11 onward. The deployment target is newer.
+    NSDictionary *attributes = @{
+        NSFontAttributeName: boldItalic,
+        NSForegroundColorAttributeName: [NSColor labelColor],
+        NSBaselineOffsetAttributeName: @(-1.0)
+    };
+    NSAttributedString *title = [[NSAttributedString alloc] initWithString:letter attributes:attributes];
+
+    _statusItem.button.attributedTitle = title;
 }
 
 @end

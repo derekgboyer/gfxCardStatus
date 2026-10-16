@@ -75,25 +75,26 @@
 - (void)showOneTimeNotification
 {
     NSAlert *versionInfo = [[NSAlert alloc] init];
-    [versionInfo setMessageText:Str(@"ThanksForDownloading")];
-    [versionInfo setInformativeText:Str(@"PleaseConsiderDonating")];
+    versionInfo.messageText = Str(@"ThanksForDownloading");
+    versionInfo.informativeText = Str(@"PleaseConsiderDonating");
     NSTextView *accessory = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 300, 15)];
-    [accessory insertText:[NSAttributedString hyperlinkFromString:kApplicationWebsiteURL
-                                                          withURL:[NSURL URLWithString:kApplicationWebsiteURL]]];
-    [accessory setEditable:NO];
-    [accessory setDrawsBackground:NO];
-    [versionInfo setAccessoryView:accessory];
+    NSAttributedString *link = [NSAttributedString hyperlinkFromString:kApplicationWebsiteURL
+                                                                withURL:[NSURL URLWithString:kApplicationWebsiteURL]];
+    [accessory.textStorage setAttributedString:link];
+    accessory.editable = NO;
+    accessory.drawsBackground = NO;
+    accessory.selectable = YES;
+    versionInfo.accessoryView = accessory;
     [versionInfo addButtonWithTitle:Str(@"DontShowAgain")];
     [versionInfo runModal];
 }
 
 - (void)showUnsupportedMachineMessage
 {
-    NSAlert *alert = [NSAlert alertWithMessageText:Str(@"UnsupportedMachine")
-                                     defaultButton:Str(@"OhISee")
-                                   alternateButton:nil 
-                                       otherButton:nil 
-                         informativeTextWithFormat:@""];
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = Str(@"UnsupportedMachine");
+    alert.informativeText = @"";
+    [alert addButtonWithTitle:Str(@"OhISee")];
     [alert runModal];
 }
 
@@ -105,14 +106,14 @@
     for (NSString *taskName in taskList)
         [descriptionText appendFormat:@"%@\n", taskName];
 
-    NSAlert *alert = [NSAlert alertWithMessageText:Str(messageKey)
-                                     defaultButton:@"OK"
-                                   alternateButton:@"Why?"
-                                       otherButton:nil
-                         informativeTextWithFormat:@"%@", descriptionText];
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = Str(messageKey);
+    alert.informativeText = descriptionText;
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Why?"];
 
-    if ([alert runModal] == NSAlertAlternateReturn)
-        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:kIntegratedOnlyMessageExplanationURL]];
+    if ([alert runModal] == NSAlertSecondButtonReturn)
+        GSOpenURL([NSURL URLWithString:kIntegratedOnlyMessageExplanationURL]);
 }
 
 #pragma mark - NSUserNotificationCenterDelegate protocol
