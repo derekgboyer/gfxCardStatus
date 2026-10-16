@@ -19,7 +19,9 @@
 
 static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
-@implementation gfxCardStatusAppDelegate
+@implementation gfxCardStatusAppDelegate {
+    BOOL _observingUpdateCheck;
+}
 
 #pragma mark - Initialization
 
@@ -100,6 +102,7 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
              forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath
                 options:NSKeyValueObservingOptionNew
                 context:GSShouldCheckForUpdatesContext];
+    _observingUpdateCheck = YES;
 
     // Check for updates if the user has them enabled.
     if ([_prefs shouldCheckForUpdatesOnStartup])
@@ -121,7 +124,8 @@ static void *GSShouldCheckForUpdatesContext = &GSShouldCheckForUpdatesContext;
 
 - (void)dealloc
 {
-    [_prefs removeObserver:self forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath context:GSShouldCheckForUpdatesContext];
+    if (_observingUpdateCheck)
+        [_prefs removeObserver:self forKeyPath:kShouldCheckForUpdatesOnStartupKeyPath context:GSShouldCheckForUpdatesContext];
 }
 
 #pragma mark - Termination Notifications

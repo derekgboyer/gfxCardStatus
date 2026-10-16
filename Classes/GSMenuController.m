@@ -335,7 +335,7 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     }
 }
 
-- (void)_updateMenuBarIconText:(BOOL)isUsingIntegrated cardString:(NSString *)cardString
+- (void)_updateMenuBarIconText:(BOOL)__unused isUsingIntegrated cardString:(NSString *)cardString
 {
     // Grab the first character of GPU string for the menu bar icon.
     unichar firstLetter;

@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		0BFCB55525641F8800875EF8 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C0FFEE000000000000000003 /* Sparkle */; };
-		0BFCB55625641F8800875EF8 /* Sparkle in Embed Frameworks */ = {isa = PBXBuildFile; productRef = C0FFEE000000000000000003 /* Sparkle */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1DDD58160DA1D0A300B32029 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 1DDD58140DA1D0A300B32029 /* MainMenu.xib */; };
 		256AC3DA0F4B6AC300CF3369 /* gfxCardStatusAppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 256AC3D90F4B6AC300CF3369 /* gfxCardStatusAppDelegate.m */; };
 		8D11072B0486CEB800E47090 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 089C165CFE840E0CC02AAC07 /* InfoPlist.strings */; };
@@ -39,19 +38,6 @@
 		A1ED2D22158860FB00B99CDE /* GSMenuController.m in Sources */ = {isa = PBXBuildFile; fileRef = A1ED2D21158860FA00B99CDE /* GSMenuController.m */; };
 /* End PBXBuildFile section */
 
-/* Begin PBXCopyFilesBuildPhase section */
-		0BFCB55725641F8800875EF8 /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				0BFCB55625641F8800875EF8 /* Sparkle in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0B7A944725645B3A0086537C /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/GeneralPreferencesView.xib; sourceTree = "<group>"; };
@@ -327,7 +313,6 @@
 				8D1107290486CEB800E47090 /* Resources */,
 				8D11072C0486CEB800E47090 /* Sources */,
 				8D11072E0486CEB800E47090 /* Frameworks */,
-				0BFCB55725641F8800875EF8 /* Embed Frameworks */,
 				0B7A943E256441C70086537C /* ShellScript */,
 			);
 			buildRules = (
