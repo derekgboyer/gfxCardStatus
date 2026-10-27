@@ -16,7 +16,12 @@
 
     #define Str(key) NSLocalizedString(key, key)
 
-    #define kApplicationWebsiteURL @"https://gfx.io"
+    // This fork. Support, downloads, and issues. Not the original gfx.io site.
+    #define kApplicationWebsiteURL @"https://github.com/derekgboyer/gfxCardStatus"
+    #define kOriginalProjectURL @"https://github.com/codykrieger/gfxCardStatus"
+    // Original author's site. Donations there support Cody Krieger, not this fork.
+    #define kOriginalAuthorWebsiteURL @"https://gfx.io"
+    #define kIntegratedOnlyMessageExplanationURL @"https://github.com/derekgboyer/gfxCardStatus#integrated-only-limitations"
 
     static inline void GSOpenURL(NSURL *url) {
         if (url == nil)

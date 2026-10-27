@@ -55,7 +55,7 @@ In App Store Connect, open **Users and Access → Integrations → App Store Con
 - `APPLE_API_ISSUER_ID`: the Issuer ID
 - `APPLE_API_KEY`: the full `.p8` file contents
 
-`script/dist` is separate. It still uses the Apple ID keychain item `AC_PASSWORD` and team `LF22FTQC25`. The Actions workflow uses the API key and does not read that keychain item.
+`script/dist` is separate. It still notarizes with the original author's Apple ID keychain item `AC_PASSWORD` (`cody@krieger.io`) and team `LF22FTQC25`. The Actions workflow uses this fork's API key secrets and does not read that keychain item.
 
 ## Sparkle EdDSA keys
 
@@ -70,7 +70,9 @@ Sparkle/bin/generate_keys
 
 `generate_keys` prints the public key and stores the private key in the login keychain (account `ed25519`, service `https://sparkle-project.org`).
 
-The `SPARKLE_PUBLIC_ED_KEY` variable is the bare base64 public key: the text inside the `<string>` element, not the surrounding `<key>SUPublicEDKey</key>` lines and not the private key. The release workflow also accepts that full snippet and extracts the key. It passes only the bare key to `xcodebuild`, which writes it to `SUPublicEDKey`. Xcode and `script/dist` do not read the variable. They keep the key in the Debug and Release build settings, currently `4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=`, and the feed `https://gfx.io/appcasts/$(SU_FEED_CHANNEL).xml`. Change those build settings only when local builds should match the GitHub feed.
+The `SPARKLE_PUBLIC_ED_KEY` variable is the bare base64 public key: the text inside the `<string>` element, not the surrounding `<key>SUPublicEDKey</key>` lines and not the private key. The release workflow also accepts that full snippet and extracts the key. It passes only the bare key to `xcodebuild`, which writes it to `SUPublicEDKey` and overrides the project setting. When the variable and the secret of the same name are both empty, the workflow does not pass the setting, and the app keeps the Debug and Release build setting.
+
+That checked-in key is `kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18=`. It is the `SUPublicEDKey` from the signed [v1.0.0](https://github.com/derekgboyer/gfxCardStatus/releases/tag/v1.0.0) app (`gfxCardStatus-2.5.zip` on that release), and it is a 32-byte Ed25519 public key. The private key that signs `appcast.xml` has to be that key's pair. Debug and Release both set `SPARKLE_FEED_URL` to `https://github.com/derekgboyer/gfxCardStatus/releases/latest/download/appcast.xml`. Xcode and `script/dist` use those defaults. `script/dist` forwards `SPARKLE_FEED_URL` and `SPARKLE_PUBLIC_ED_KEY` to `xcodebuild` when those variables are set in the environment, which is the same override the tag workflow uses.
 
 Export the private key and store that single line of base64 as `SPARKLE_PRIVATE_KEY`:
 
@@ -97,4 +99,4 @@ The app built by the tag workflow uses:
 
 `https://github.com/<owner>/<repo>/releases/latest/download/appcast.xml`
 
-Copies built by Xcode or `script/dist` still check `https://gfx.io`. Tagging a release does not move those installs onto the GitHub feed.
+That URL is passed as `SPARKLE_FEED_URL`, which overrides the project default. On this repository the override and the default are the same feed. A tag built in a different fork still points at that fork. Copies built by Xcode or `script/dist` check this repository's feed unless `SPARKLE_FEED_URL` is overridden the same way.

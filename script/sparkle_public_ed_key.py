@@ -116,8 +116,10 @@ def _expect_error(raw, needle):
 
 
 def self_test():
-    bare = "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao="
-    other = "kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18="
+    # Two distinct 32-byte keys. fork_key is this repo's published SUPublicEDKey
+    # (v1.0.0 gfxCardStatus-2.5.zip). upstream_key is the old gfx.io feed key.
+    bare = "kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18="
+    other = "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao="
     _expect(bare, bare)
     _expect(f"  {bare}\n", bare)
     _expect(f'"{bare}"', bare)

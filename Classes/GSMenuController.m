@@ -237,6 +237,12 @@ static void *GSAppearanceContext = &GSAppearanceContext;
     GSOpenURL([NSURL URLWithString:kApplicationWebsiteURL]);
 }
 
+- (IBAction)openOriginalProjectURL:(id)sender
+{
+    (void)sender;
+    GSOpenURL([NSURL URLWithString:kOriginalProjectURL]);
+}
+
 - (IBAction)quit:(id)sender
 {
     [[NSApplication sharedApplication] terminate:self];

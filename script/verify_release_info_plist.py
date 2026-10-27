@@ -9,7 +9,9 @@ import os
 import plistlib
 import sys
 
-PROJECT_DEFAULT_KEY = "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao="
+# Public key baked into Debug/Release. Taken from SUPublicEDKey in the v1.0.0
+# release zip (gfxCardStatus-2.5.zip), not from the original gfx.io app.
+PROJECT_DEFAULT_KEY = "kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18="
 
 
 def check(info, feed_url, override):
@@ -39,7 +41,7 @@ def self_test():
     }
     if not check(info, feed, ""):
         raise SystemExit("project default key was rejected")
-    other = "kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18="
+    other = "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao="
     info["SUPublicEDKey"] = other
     if not check(info, feed, other):
         raise SystemExit("repository key was rejected")

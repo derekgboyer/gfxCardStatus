@@ -14,8 +14,8 @@ import sys
 def check(info, commit_count):
     ok = True
     expected = {
-        "SUFeedURL": "https://gfx.io/appcasts/release.xml",
-        "SUPublicEDKey": "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=",
+        "SUFeedURL": "https://github.com/derekgboyer/gfxCardStatus/releases/latest/download/appcast.xml",
+        "SUPublicEDKey": "kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18=",
         "CFBundleIdentifier": "com.codykrieger.gfxCardStatus",
     }
     for key, want in expected.items():

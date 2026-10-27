@@ -639,7 +639,7 @@
                         <items>
                             <menuItem title="gfxCardStatus Help" keyEquivalent="?" id="492">
                                 <connections>
-                                    <action selector="showHelp:" target="-1" id="493"/>
+                                    <action selector="openApplicationURL:" target="850" id="493"/>
                                 </connections>
                             </menuItem>
                         </items>
@@ -718,8 +718,11 @@
                     <modifierMask key="keyEquivalentModifierMask"/>
                 </menuItem>
                 <menuItem isSeparatorItem="YES" id="711"/>
-                <menuItem title="by Cody Krieger" id="647">
+                <menuItem title="Original author: Cody Krieger" id="647">
                     <modifierMask key="keyEquivalentModifierMask"/>
+                    <connections>
+                        <action selector="openOriginalProjectURL:" target="850" id="c647"/>
+                    </connections>
                 </menuItem>
                 <menuItem title="VisitWebsite" id="648">
                     <modifierMask key="keyEquivalentModifierMask"/>
