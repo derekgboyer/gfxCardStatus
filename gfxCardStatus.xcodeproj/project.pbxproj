@@ -578,10 +578,9 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.codykrieger.${PRODUCT_NAME:rfc1034identifier}";
 				PRODUCT_NAME = gfxCardStatus;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				SPARKLE_FEED_URL = "https://gfx.io/appcasts/$(SU_FEED_CHANNEL).xml";
-				SPARKLE_PUBLIC_ED_KEY = "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=";
-				SU_FEED_CHANNEL = testing;
-				SU_FEED_URL = "https://gfx.io/appcasts/$(SU_FEED_CHANNEL).xml";
+				SPARKLE_FEED_URL = "https://github.com/derekgboyer/gfxCardStatus/releases/latest/download/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18=";
+				SU_FEED_URL = "https://github.com/derekgboyer/gfxCardStatus/releases/latest/download/appcast.xml";
 			};
 			name = Debug;
 		};
@@ -616,10 +615,9 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.codykrieger.${PRODUCT_NAME:rfc1034identifier}";
 				PRODUCT_NAME = gfxCardStatus;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				SPARKLE_FEED_URL = "https://gfx.io/appcasts/$(SU_FEED_CHANNEL).xml";
-				SPARKLE_PUBLIC_ED_KEY = "4duXTeQPGZRwAyOAG2Wvqjkuk23es7QEuuy9FcjPEao=";
-				SU_FEED_CHANNEL = release;
-				SU_FEED_URL = "https://gfx.io/appcasts/$(SU_FEED_CHANNEL).xml";
+				SPARKLE_FEED_URL = "https://github.com/derekgboyer/gfxCardStatus/releases/latest/download/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "kwGfxsca37dMWVwYY/YElw+U+vF6QDXHnXbqCpWNm18=";
+				SU_FEED_URL = "https://github.com/derekgboyer/gfxCardStatus/releases/latest/download/appcast.xml";
 			};
 			name = Release;
 		};

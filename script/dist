@@ -13,6 +13,8 @@ set -eo pipefail
 # ================================================================================
 
 PROJECT_NAME="gfxCardStatus"
+# Notarization below still uses the original author's Apple ID and team.
+# Signed releases of this fork are the tag builds in .github/workflows/release.yml.
 AC_USERNAME="cody@krieger.io"
 AC_PASSWORD="@keychain:AC_PASSWORD"
 TEAM_ID="LF22FTQC25"
@@ -20,13 +22,17 @@ BUILD_DIR="$(pwd)/build"
 EXPORT_PATH="$BUILD_DIR/export"
 APP_PATH="$EXPORT_PATH/$PROJECT_NAME.app"
 
-if grep -q -m1 -E "MARKETING_VERSION = ([0-9.]+)b[0-9]" gfxCardStatus.xcodeproj/project.pbxproj ; then
-    SU_FEED_CHANNEL_DEFAULT="beta"
-else
-    SU_FEED_CHANNEL_DEFAULT="release"
+# Sparkle feed and public key come from the Debug/Release build settings
+# (this fork's GitHub Releases appcast and Ed25519 key). SPARKLE_FEED_URL and
+# SPARKLE_PUBLIC_ED_KEY, when set, are passed through to xcodebuild and override
+# those settings the same way .github/workflows/release.yml does.
+XCODE_SETTINGS=()
+if [ -n "${SPARKLE_FEED_URL:-}" ]; then
+    XCODE_SETTINGS+=("SPARKLE_FEED_URL=${SPARKLE_FEED_URL}")
 fi
-
-SU_FEED_CHANNEL="${SU_FEED_CHANNEL:-$SU_FEED_CHANNEL_DEFAULT}"
+if [ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]; then
+    XCODE_SETTINGS+=("SPARKLE_PUBLIC_ED_KEY=${SPARKLE_PUBLIC_ED_KEY}")
+fi
 
 echo "----> cleaning..."
 rm -rf "$BUILD_DIR"
@@ -36,7 +42,7 @@ xcodebuild -workspace gfxCardStatus.xcworkspace \
     -scheme gfxCardStatus \
     archive \
     EXPORT_PATH="$EXPORT_PATH" \
-    SU_FEED_CHANNEL="$SU_FEED_CHANNEL"
+    "${XCODE_SETTINGS[@]}"
 
 VERSION="$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleShortVersionString)"
 BUILD_VERSION="$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleVersion)"
@@ -73,9 +79,14 @@ ditto -ck --keepParent "$APP_PATH" "$ZIP_PATH"
 
 SIZE=$(stat -f %z "$ZIP_PATH")
 PUBDATE=$(LC_TIME=en_US date +"%a, %d %b %G %T %z")
-BASE_URL="https://gfx.io"
-RELEASENOTES_URL="$BASE_URL/release-notes/$VERSION.html"
-DOWNLOAD_URL="https://github.com/codykrieger/gfxCardStatus/releases/download/v$VERSION/$(basename $ZIP_PATH)"
+REPO_URL="https://github.com/derekgboyer/gfxCardStatus"
+RELEASENOTES_URL="$REPO_URL/releases/latest"
+# The app itself checks releases/latest/download/appcast.xml. This snippet is
+# the enclosure for a manual appcast. Tag names on this fork are not the
+# marketing version (v1.0.0 shipped the 2.5 app), so replace the tag if you paste this.
+DOWNLOAD_URL="$REPO_URL/releases/download/v$VERSION/$(basename "$ZIP_PATH")"
+FEED_URL="$(defaults read "$APP_PATH/Contents/Info.plist" SUFeedURL)"
+echo "----> built SUFeedURL: $FEED_URL"
 
 echo "----> signing archive (ed25519)..."
 ED25519_SIGNATURE="$(script/sign_update "$ZIP_PATH" | sed -E 's/^sparkle:edSignature="(.+)" length=".*"$/\1/g')"

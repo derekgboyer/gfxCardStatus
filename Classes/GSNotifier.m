@@ -16,7 +16,6 @@
 
 #define kGPUChangedNotificationKey @"GrowlGPUChanged"
 
-#define kIntegratedOnlyMessageExplanationURL [kApplicationWebsiteURL stringByAppendingString:@"/switching.html#integrated-only-mode-limitations"]
 #define kGPUChangeNotificationIdentifier @"com.codykrieger.gfxCardStatus.gpu-changed"
 #define kPowerRuleBlockedNotificationIdentifier @"com.codykrieger.gfxCardStatus.power-rule-blocked"
 #define kDiscreteOnBatteryNotificationIdentifier @"com.codykrieger.gfxCardStatus.discrete-on-battery"
@@ -111,11 +110,18 @@
 {
     NSAlert *versionInfo = [[NSAlert alloc] init];
     versionInfo.messageText = Str(@"ThanksForDownloading");
-    versionInfo.informativeText = Str(@"PleaseConsiderDonating");
-    NSTextView *accessory = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 300, 15)];
-    NSAttributedString *link = [NSAttributedString hyperlinkFromString:kApplicationWebsiteURL
-                                                                withURL:[NSURL URLWithString:kApplicationWebsiteURL]];
-    [accessory.textStorage setAttributedString:link];
+    versionInfo.informativeText = Str(@"ForkMaintainerNotice");
+
+    // First link is this fork. Second link is the original author's site, labeled in the notice.
+    NSMutableAttributedString *links = [[NSMutableAttributedString alloc] init];
+    [links appendAttributedString:[NSAttributedString hyperlinkFromString:kApplicationWebsiteURL
+                                                                   withURL:[NSURL URLWithString:kApplicationWebsiteURL]]];
+    [links appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"]];
+    [links appendAttributedString:[NSAttributedString hyperlinkFromString:kOriginalAuthorWebsiteURL
+                                                                   withURL:[NSURL URLWithString:kOriginalAuthorWebsiteURL]]];
+
+    NSTextView *accessory = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 460, 40)];
+    [accessory.textStorage setAttributedString:links];
     accessory.editable = NO;
     accessory.drawsBackground = NO;
     accessory.selectable = YES;

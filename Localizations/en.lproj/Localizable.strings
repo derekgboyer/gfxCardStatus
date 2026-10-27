@@ -23,7 +23,7 @@
 "PowerSource"           = "Power Source: %%";
 "Battery"               = "Battery";
 "ACAdapter"             = "AC Adapter";
-"VisitWebsite"          = "Visit website (%%)…";
+"VisitWebsite"          = "Project page (%%)…";
 
 /* Preferences window */
 "PrefTitle"				= "gfxCardStatus Preferences";
@@ -61,6 +61,7 @@
 /* Startup box */
 "ThanksForDownloading"      = "Thanks for downloading gfxCardStatus!";
 "PleaseConsiderDonating"    = "If you find it useful, please consider donating to support development and hosting costs. You can find the donate link and the FAQ page on the gfxCardStatus website:";
+"ForkMaintainerNotice"      = "This is an independently maintained fork of gfxCardStatus by Cody Krieger. It is not affiliated with or supported by the original author. The first link is this fork's GitHub page (downloads, updates, and issues). The second link is gfx.io, the original author's site. Donations there support Cody Krieger.";
 "DontShowAgain"             = "Don't show this again!";
 
 /* Unsupported machine box */
